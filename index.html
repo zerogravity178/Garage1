@@ -251,25 +251,6 @@
     });
     if (error) showToast('Ошибка: ' + error.message);
   }
-  
-    const btn = document.getElementById('login-btn');
-    btn.textContent = 'Отправляем...';
-    btn.disabled = true;
-
-    const { error } = await db.auth.signInWithOtp({
-      email: email,
-      options: { emailRedirectTo: window.location.href }
-    });
-
-    btn.textContent = 'Получить ссылку';
-    btn.disabled = false;
-
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
-      showToast('Ссылка отправлена на ' + email);
-    }
-  }
 
   function switchTab(name, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
@@ -497,6 +478,7 @@
       loadMaint();
       loadHome(); // Главная обновится и покажет новый пробег
     }
+  } // <--- ЗДЕСЬ БЫЛА ПОТЕРЯНА СКОБКА, ТЕПЕРЬ ОНА НА МЕСТЕ
 
   async function loadMaint() {
     const { data: { user } } = await db.auth.getUser();
