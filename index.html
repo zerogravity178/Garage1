@@ -303,6 +303,7 @@
         <input type="text" id="v-model" class="input" placeholder="Модель (например, Camry)">
         <input type="number" id="v-year" class="input" placeholder="Год выпуска (например, 2015)">
         <input type="number" id="v-mileage" class="input" placeholder="Текущий пробег (км)">
+        <input type="number" id="v-consumption" class="input" placeholder="Расход по БК, л/100 км (необязательно)" step="0.1">
         <button class="btn" onclick="saveVehicle()" id="save-vehicle-btn" style="margin-top: 8px;">Сохранить в облако</button>
       </div>
     `;
@@ -336,7 +337,8 @@
       brand: brand,
       model: model,
       year: year ? parseInt(year) : null,
-      current_mileage: mileage ? parseInt(mileage) : 0
+      current_mileage: mileage ? parseInt(mileage) : 0,
+      fuel_consumption: document.getElementById('v-consumption').value ? parseFloat(document.getElementById('v-consumption').value) : null
     });
 
     btn.textContent = 'Сохранить в облако';
