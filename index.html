@@ -475,12 +475,21 @@
     if (error) {
       showToast('Ошибка: ' + error.message);
     } else {
+      // --- НАЧАЛО НОВОГО КОДА ---
+      // Проверяем, не нужно ли обновить пробег у машины
+      const newMileage = parseInt(mileage);
+      const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', currentVehicleId).single();
+      
+      if (vData && newMileage > (vData.current_mileage || 0)) {
+        await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', currentVehicleId);
+      }
+      // --- КОНЕЦ НОВОГО КОДА ---
+
       document.getElementById('add-maint-modal').remove();
       showToast('Запись добавлена!');
       loadMaint();
-      loadHome();
+      loadHome(); // Главная обновится и покажет новый пробег
     }
-  }
 
   async function loadMaint() {
     const { data: { user } } = await db.auth.getUser();
