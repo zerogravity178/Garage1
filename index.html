@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0E0F11">
+  <title>MY GARAGE</title>
+  <link rel="manifest" href="manifest.json">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0E0F11;
+      --card: #17191C;
+      --border: #24272B;
+      --accent: #00E5C0;
+      --accent-dim: #00B89A;
+      --text: #F2F4F5;
+      --text-dim: #8A9099;
+      --danger: #FF5A5F;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 80px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .screen { display: none; padding: 20px; }
+    .screen.active { display: block; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-top: 8px;
+    }
+    .logo { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: var(--accent); }
+    .btn {
+      background: var(--accent);
+      color: #0E0F11;
+      border: none;
+      padding: 16px 24px;
+      border-radius: 14px;
+      font-size: 17px;
+      font-weight: 600;
+      width: 100%;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:active { background: var(--accent-dim); }
+    .btn-outline {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .input {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      font-size: 17px;
+      color: var(--text);
+      margin-bottom: 12px;
+      outline: none;
+    }
+    .input:focus { border-color: var(--accent); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+    .card-label { font-size: 13px; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card-value { font-size: 28px; font-weight: 700; }
+    .card-value.accent { color: var(--accent); }
+    .auth-box { max-width: 400px; margin: 60px auto 0; text-align: center; }
+    .auth-box h1 { font-size: 32px; margin-bottom: 8px; }
+    .auth-box p { color: var(--text-dim); margin-bottom: 32px; font-size: 15px; line-height: 1.5; }
+    .nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 0 24px;
+      z-index: 100;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 4px 12px;
+      border: none;
+      background: none;
+      font-family: inherit;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-icon { font-size: 22px; line-height: 1; }
+    .section-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+    .empty { color: var(--text-dim); text-align: center; padding: 40px 20px; font-size: 15px; line-height: 1.6; }
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      right: 20px;
+      background: var(--accent);
+      color: #0E0F11;
+      padding: 14px 18px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      z-index: 200;
+      display: none;
+      text-align: center;
+    }
+    .toast.show { display: block; }
+    .logout { background: none; border: none; color: var(--text-dim); font-size: 14px; cursor: pointer; font-family: inherit; }
+  </style>
+</head>
+<body>
+
+<div id="toast" class="toast"></div>
+
+<!-- ЭКРАН ВХОДА -->
+<div id="screen-auth" class="screen active">
+  <div class="auth-box">
+    <h1>MY <span style="color: var(--accent)">GARAGE</span></h1>
+    <p>Введи email — пришлём ссылку для входа. Пароль не нужен.</p>
+    <input type="email" id="email-input" class="input" placeholder="твой@email.com" autocomplete="email">
+    <button class="btn" onclick="sendMagicLink()" id="login-btn">Получить ссылку</button>
+    <p style="margin-top: 20px; font-size: 13px;">Ссылка придёт на почту. Открой её на этом же телефоне.</p>
+  </div>
+</div>
+
+<!-- ЭКРАН ПРИЛОЖЕНИЯ -->
+<div id="screen-app" class="screen">
+  <div class="header">
+    <div class="logo">MY <span>GARAGE</span></div>
+    <button class="logout" onclick="logout()">Выйти</button>
+  </div>
+
+  <!-- ГЛАВНАЯ -->
+  <div id="tab-home" class="tab-content">
+    <div class="card">
+      <div class="card-label">Автомобиль</div>
+      <div class="card-value" style="font-size: 20px;">Ещё не добавлен</div>
+      <p style="color: var(--text-dim); font-size: 13px; margin-top: 6px;">Перейди в «Гараж» → «Добавить авто»</p>
+    </div>
+    <div class="card">
+      <div class="card-label">Средний расход</div>
+      <div class="card-value accent">— л/100 км</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Расходы за месяц</div>
+      <div class="card-value">— ₽</div>
+    </div>
+  </div>
+
+  <!-- ГАРАЖ -->
+  <div id="tab-garage" class="tab-content" style="display: none;">
+    <div class="section-title">Мой гараж</div>
+    <div class="empty">Пока пусто.<br>Здесь будут твои автомобили.</div>
+  </div>
+
+  <!-- ОБСЛУЖИВАНИЕ -->
+  <div id="tab-maint" class="tab-content" style="display: none;">
+    <div class="section-title">Обслуживание</div>
+    <div class="empty">История ремонтов и работ.<br>Появится на следующем шаге.</div>
+  </div>
+
+  <!-- РАСХОДЫ -->
+  <div id="tab-expenses" class="tab-content" style="display: none;">
+    <div class="section-title">Расходы</div>
+    <div class="empty">Страховка, налог, мойка, шины.<br>Здесь будут записи.</div>
+  </div>
+
+  <!-- ЗАПРАВКИ -->
+  <div id="tab-refuels" class="tab-content" style="display: none;">
+    <div class="section-title">Заправки</div>
+    <div class="empty">Литры, цена, пробег.<br>Здесь будет история заправок и расчёт расхода.</div>
+  </div>
+
+  <!-- НАВИГАЦИЯ -->
+  <div class="nav">
+    <button class="nav-item active" onclick="switchTab('home', this)">
+      <span class="nav-icon">⌂</span>Главная
+    </button>
+    <button class="nav-item" onclick="switchTab('garage', this)">
+      <span class="nav-icon">▤</span>Гараж
+    </button>
+    <button class="nav-item" onclick="switchTab('maint', this)">
+      <span class="nav-icon">⚙</span>ТО
+    </button>
+    <button class="nav-item" onclick="switchTab('expenses', this)">
+      <span class="nav-icon">₽</span>Расходы
+    </button>
+    <button class="nav-item" onclick="switchTab('refuels', this)">
+      <span class="nav-icon">⛽</span>Заправки
+    </button>
+  </div>
+</div>
+
+<script>
+  // ЗАМЕНИ НА СВОИ ЗНАЧЕНИЯ ИЗ SUPABASE
+  const SUPABASE_URL = 'https://zdhbzoprpjosfvuhhcfp.supabase.co';
+  const SUPABASE_ANON_KEY = 'http://localhost:3000';
+
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  async function sendMagicLink() {
+    const email = document.getElementById('email-input').value.trim();
+    if (!email || !email.includes('@')) {
+      showToast('Введи корректный email');
+      return;
+    }
+    const btn = document.getElementById('login-btn');
+    btn.textContent = 'Отправляем...';
+    btn.disabled = true;
+
+    const { error } = await db.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.href }
+    });
+
+    btn.textContent = 'Получить ссылку';
+    btn.disabled = false;
+
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      showToast('Ссылка отправлена на ' + email);
+    }
+  }
+
+  function switchTab(name, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.getElementById('tab-' + name).style.display = 'block';
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  async function logout() {
+    await db.auth.signOut();
+    window.location.reload();
+  }
+
+  // Проверка сессии при загрузке
+  async function init() {
+    const { data: { session } } = await db.auth.getSession();
+    if (session) {
+      document.getElementById('screen-auth').classList.remove('active');
+      document.getElementById('screen-app').classList.add('active');
+    } else {
+      document.getElementById('screen-auth').classList.add('active');
+      document.getElementById('screen-app').classList.remove('active');
+    }
+  }
+
+  // Слушаем изменения входа
+  db.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      document.getElementById('screen-auth').classList.remove('active');
+      document.getElementById('screen-app').classList.add('active');
+    }
+  });
+
+  init();
+</script>
+</body>
+</html>
