@@ -198,8 +198,14 @@
 
   <!-- РАСХОДЫ -->
   <div id="tab-expenses" class="tab-content" style="display: none;">
-    <div class="section-title">Расходы</div>
-    <div class="empty">Страховка, налог, мойка, шины.<br>Здесь будут записи.</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div class="section-title" style="margin-bottom: 0;">Расходы</div>
+      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddExpense()">+ Добавить</button>
+    </div>
+    
+    <div id="expenses-list">
+      <div class="empty" id="expenses-empty">Пока пусто.<br>Нажми «Добавить», чтобы записать трату.</div>
+    </div>
   </div>
 
   <!-- ЗАПРАВКИ -->
@@ -392,6 +398,26 @@
       document.getElementById('home-car-name').style.fontSize = '16px';
       document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
     }
+
+    // Считаем расходы за текущий месяц (ремонты + прочие расходы)
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    
+    const { data: maint } = await db.from('maintenance').select('cost').gte('date', firstDay);
+    const { data: exp } = await db.from('expenses').select('amount').gte('date', firstDay);
+    
+    let total = 0;
+    if (maint) maint.forEach(m => total += Number(m.cost));
+    if (exp) exp.forEach(e => total += Number(e.amount));
+
+    // Ищем карточку "Расходы за месяц" и меняем цифру
+    const cards = document.querySelectorAll('#tab-home .card');
+    cards.forEach(card => {
+      if (card.innerText.includes('Расходы за месяц')) {
+        const valDiv = card.querySelector('.card-value');
+        if (valDiv) valDiv.textContent = `${total.toLocaleString('ru-RU')} ₽`;
+      }
+    });
   }
 
   // ==========================================
@@ -507,8 +533,10 @@
     records.forEach(r => {
       const card = document.createElement('div');
       card.className = 'card';
+      card.style.position = 'relative'; // <--- ДОБАВИЛИ
       card.innerHTML = `
-        <div class="card-label">${new Date(r.date).toLocaleDateString('ru-RU')} • ${r.mileage} км</div>
+        <button onclick="deleteMaint('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+        <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')} • ${r.mileage} км</div>
         <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${r.title}</div>
         <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.cost} ₽</div>
         ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${r.comment}</div>` : ''}
@@ -531,6 +559,7 @@
       loadHome();
       loadVehicles();
       loadMaint();
+      loadExpenses(); // <--- ДОБАВИТЬ ВОТ ЭТУ СТРОЧКУ
     } else {
       document.getElementById('screen-auth').classList.add('active');
       document.getElementById('screen-app').classList.remove('active');
@@ -547,10 +576,144 @@
       loadHome();
       loadVehicles();
       loadMaint();
+      loadExpenses(); // <--- ДОБАВИТЬ ВОТ ЭТУ СТРОЧКУ
     }
   });
 
   // Запускаем приложение
+
+  // === УДАЛЕНИЕ ОБСЛУЖИВАНИЯ ===
+  async function deleteMaint(id) {
+    if (!confirm('Удалить эту запись?')) return;
+    const { error } = await db.from('maintenance').delete().eq('id', id);
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      showToast('Запись удалена');
+      loadMaint(); 
+    }
+  }
+
+  // === ЛОГИКА РАСХОДОВ ===
+  async function openAddExpense() {
+    const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
+    if (!vehicles || vehicles.length === 0) {
+      showToast('Сначала добавь автомобиль');
+      return;
+    }
+    const vId = vehicles[0].id;
+
+    const modal = document.createElement('div');
+    modal.id = 'add-expense-modal';
+    modal.style.cssText = `position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;`;
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+          <div class="section-title" style="margin: 0;">Новый расход</div>
+          <button onclick="document.getElementById('add-expense-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+        </div>
+        
+        <select id="e-category" class="input" style="appearance: none; -webkit-appearance: none;">
+          <option value="Страхование">Страхование (ОСАГО/КАСКО)</option>
+          <option value="Налоги">Транспортный налог</option>
+          <option value="Штрафы">Штрафы</option>
+          <option value="Мойка">Мойка</option>
+          <option value="Шины">Шины</option>
+          <option value="Аксессуары">Аксессуары</option>
+          <option value="Прочее">Прочее</option>
+        </select>
+        
+        <input type="number" id="e-amount" class="input" placeholder="Сумма (₽)">
+        <input type="date" id="e-date" class="input">
+        <input type="text" id="e-comment" class="input" placeholder="Комментарий (необязательно)">
+        <button class="btn" onclick="saveExpense('${vId}')" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  async function saveExpense(vehicleId) {
+    const category = document.getElementById('e-category').value;
+    const amount = document.getElementById('e-amount').value;
+    const date = document.getElementById('e-date').value;
+    const comment = document.getElementById('e-comment').value.trim();
+
+    if (!amount || !date) {
+      showToast('Заполни сумму и дату');
+      return;
+    }
+
+    const btn = document.getElementById('save-expense-btn');
+    btn.textContent = 'Сохраняем...';
+    btn.disabled = true;
+
+    const { error } = await db.from('expenses').insert({
+      user_id: (await db.auth.getUser()).data.user.id,
+      vehicle_id: vehicleId,
+      category: category,
+      amount: parseFloat(amount),
+      date: date,
+      comment: comment
+    });
+
+    btn.textContent = 'Сохранить';
+    btn.disabled = false;
+
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      document.getElementById('add-expense-modal').remove();
+      showToast('Расход добавлен!');
+      loadExpenses();
+      loadHome();
+    }
+  }
+
+  async function loadExpenses() {
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) return;
+
+    const { data: records, error } = await db.from('expenses').select('*').order('date', { ascending: false });
+    if (error) return;
+
+    const list = document.getElementById('expenses-list');
+    const empty = document.getElementById('expenses-empty');
+
+    if (!records || records.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'expenses-empty') child.remove();
+    });
+
+    records.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.position = 'relative';
+      card.innerHTML = `
+        <button onclick="deleteExpense('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+        <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')} • ${r.category}</div>
+        <div style="color: var(--accent); font-size: 20px; font-weight: 600;">${r.amount} ₽</div>
+        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${r.comment}</div>` : ''}
+      `;
+      list.appendChild(card);
+    });
+  }
+
+  async function deleteExpense(id) {
+    if (!confirm('Удалить этот расход?')) return;
+    const { error } = await db.from('expenses').delete().eq('id', id);
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      showToast('Расход удален');
+      loadExpenses();
+      loadHome();
+    }
+  }
   init();
 </script>
 </body>
