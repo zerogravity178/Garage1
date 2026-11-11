@@ -209,9 +209,21 @@
   </div>
 
   <!-- ЗАПРАВКИ -->
+  <!-- ЗАПРАВКИ -->
   <div id="tab-refuels" class="tab-content" style="display: none;">
-    <div class="section-title">Заправки</div>
-    <div class="empty">Литры, цена, пробег.<br>Здесь будет история заправок и расчёт расхода.</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div class="section-title" style="margin-bottom: 0;">Заправки</div>
+      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddRefuel()">+ Добавить</button>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Потрачено на топливо за месяц</div>
+      <div class="card-value accent" id="refuel-month-total">— ₽</div>
+    </div>
+
+    <div id="refuels-list">
+      <div class="empty" id="refuels-empty">Пока пусто.<br>Добавь первую заправку.</div>
+    </div>
   </div>
 
   <!-- НАВИГАЦИЯ -->
@@ -545,6 +557,172 @@
     });
   }
 
+// ==========================================
+// ЛОГИКА ЗАПРАВОК (упрощённая)
+// ==========================================
+async function openAddRefuel() {
+  const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
+  if (!vehicles || vehicles.length === 0) {
+    showToast('Сначала добавь автомобиль');
+    return;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'add-refuel-modal';
+  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
+  modal.innerHTML = `
+    <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+        <div class="section-title" style="margin: 0;">Новая заправка</div>
+        <button onclick="document.getElementById('add-refuel-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+      </div>
+
+      <input type="date" id="r-date" class="input">
+      <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
+      <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
+      <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
+
+      <button type="button" onclick="document.getElementById('r-extra').style.display='block'; this.style.display='none';"
+        style="background: none; border: none; color: var(--text-dim); font-size: 14px; padding: 8px 0 16px; cursor: pointer; font-family: inherit;">
+        + Дополнительно (пробег, полный бак)
+      </button>
+
+      <div id="r-extra" style="display: none;">
+        <input type="number" id="r-mileage" class="input" placeholder="Пробег (км, необязательно)">
+        <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
+          <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
+          <span style="font-size: 15px;">Полный бак</span>
+        </label>
+      </div>
+
+      <button class="btn" onclick="saveRefuel()" id="save-refuel-btn" style="margin-top: 8px;">Сохранить</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function saveRefuel() {
+  const date = document.getElementById('r-date').value;
+  const liters = document.getElementById('r-liters').value;
+  const total = document.getElementById('r-total').value;
+  const comment = document.getElementById('r-comment').value.trim();
+  const mileageEl = document.getElementById('r-mileage');
+  const mileage = mileageEl ? mileageEl.value : '';
+  const fullEl = document.getElementById('r-full');
+  const isFull = fullEl ? fullEl.checked : false;
+
+  if (!date || !liters || !total) {
+    showToast('Заполни дату, литры и сумму');
+    return;
+  }
+
+  const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
+  if (!vehicles || vehicles.length === 0) {
+    showToast('Сначала добавь автомобиль');
+    return;
+  }
+  const vehicleId = vehicles[0].id;
+
+  const btn = document.getElementById('save-refuel-btn');
+  btn.textContent = 'Сохраняем...';
+  btn.disabled = true;
+
+  const { error } = await db.from('refuels').insert({
+    user_id: (await db.auth.getUser()).data.user.id,
+    vehicle_id: vehicleId,
+    date: date,
+    liters: parseFloat(liters),
+    total_cost: parseFloat(total),
+    mileage: mileage ? parseInt(mileage) : null,
+    is_full_tank: isFull,
+    comment: comment
+  });
+
+  btn.textContent = 'Сохранить';
+  btn.disabled = false;
+
+  if (error) {
+    showToast('Ошибка: ' + error.message);
+    return;
+  }
+
+  if (mileage) {
+    const newMileage = parseInt(mileage);
+    const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', vehicleId).single();
+    if (vData && newMileage > (vData.current_mileage || 0)) {
+      await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', vehicleId);
+    }
+  }
+
+  document.getElementById('add-refuel-modal').remove();
+  showToast('Заправка добавлена!');
+  loadRefuels();
+  loadHome();
+}
+
+async function loadRefuels() {
+  const { data: { user } } = await db.auth.getUser();
+  if (!user) return;
+
+  const { data: records, error } = await db
+    .from('refuels')
+    .select('*')
+    .order('date', { ascending: false });
+
+  if (error) return;
+
+  const list = document.getElementById('refuels-list');
+  const empty = document.getElementById('refuels-empty');
+
+  if (!records || records.length === 0) {
+    empty.style.display = 'block';
+    document.getElementById('refuel-month-total').textContent = '0 ₽';
+    return;
+  }
+
+  empty.style.display = 'none';
+  Array.from(list.children).forEach(child => {
+    if (child.id !== 'refuels-empty') child.remove();
+  });
+
+  const now = new Date();
+  const monthTotal = records
+    .filter(r => {
+      const d = new Date(r.date);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    })
+    .reduce((sum, r) => sum + Number(r.total_cost || 0), 0);
+  document.getElementById('refuel-month-total').textContent =
+    monthTotal.toLocaleString('ru-RU') + ' ₽';
+
+  records.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.position = 'relative';
+    const mileageStr = r.mileage ? ' • ' + r.mileage + ' км' : '';
+    card.innerHTML = `
+      <button onclick="deleteRefuel('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+      <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')}${mileageStr}</div>
+      <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${r.liters} л</div>
+      <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${Number(r.total_cost).toLocaleString('ru-RU')} ₽</div>
+      ${r.comment ? '<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">' + r.comment + '</div>' : ''}
+    `;
+    list.appendChild(card);
+  });
+}
+
+async function deleteRefuel(id) {
+  if (!confirm('Удалить эту заправку?')) return;
+  const { error } = await db.from('refuels').delete().eq('id', id);
+  if (error) {
+    showToast('Ошибка: ' + error.message);
+  } else {
+    showToast('Заправка удалена');
+    loadRefuels();
+    loadHome();
+  }
+}
+// ==========================================
   // ==========================================
   // ИНИЦИАЛИЗАЦИЯ ПРИЛОЖЕНИЯ
   // ==========================================
@@ -559,7 +737,8 @@
       loadHome();
       loadVehicles();
       loadMaint();
-      loadExpenses(); // <--- ДОБАВИТЬ ВОТ ЭТУ СТРОЧКУ
+      loadExpenses();
+      loadRefuels();
     } else {
       document.getElementById('screen-auth').classList.add('active');
       document.getElementById('screen-app').classList.remove('active');
@@ -576,7 +755,8 @@
       loadHome();
       loadVehicles();
       loadMaint();
-      loadExpenses(); // <--- ДОБАВИТЬ ВОТ ЭТУ СТРОЧКУ
+      loadExpenses();
+      loadRefuels();
     }
   });
 
