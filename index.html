@@ -167,7 +167,7 @@
     </div>
     <div class="card">
       <div class="card-label">Расходы за месяц</div>
-      <div class="card-value">— ₽</div>
+      <div class="card-value" id="home-expenses">— ₽</div>
     </div>
   </div>
 
@@ -401,6 +401,7 @@
     const { data: { user } } = await db.auth.getUser();
     if (!user) return;
 
+    // 1. Инфа по машине
     const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
     
     if (vehicles && vehicles.length > 0) {
@@ -413,7 +414,7 @@
       document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
     }
 
-    // Расход по БК
+    // 2. Расход по БК
     if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
       document.getElementById('home-consumption').textContent = vehicles[0].fuel_consumption + ' л/100 км';
       document.getElementById('home-consumption').style.fontSize = '28px';
@@ -422,27 +423,42 @@
       document.getElementById('home-consumption').style.fontSize = '16px';
     }
 
-    // Считаем расходы за текущий месяц (ремонты + прочие расходы)
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const firstDay = `${year}-${month}-01`;
-    
-    const { data: maint } = await db.from('maintenance').select('cost').gte('date', firstDay);
-    const { data: exp } = await db.from('expenses').select('amount').gte('date', firstDay);
+    // 3. Считаем расходы (без фильтров в базе, фильтруем прямо тут)
+    const { data: maint } = await db.from('maintenance').select('*');
+    const { data: exp } = await db.from('expenses').select('*');
     
     let total = 0;
-    if (maint) maint.forEach(m => total += Number(m.cost || 0));
-    if (exp) exp.forEach(e => total += Number(e.amount || 0));
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
 
-    // Меняем цифру на карточке
-    const cards = document.querySelectorAll('#tab-home .card');
-    cards.forEach(card => {
-      if (card.innerText.includes('Расходы за месяц')) {
-        const valDiv = card.querySelector('.card-value');
-        if (valDiv) valDiv.textContent = `${total.toLocaleString('ru-RU')} ₽`;
-      }
-    });
+    // Складываем ремонты за текущий месяц
+    if (maint) {
+      maint.forEach(m => {
+        if (!m.date) return;
+        const d = new Date(m.date);
+        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+          total += Number(m.cost || 0);
+        }
+      });
+    }
+    
+    // Складываем прочие расходы за текущий месяц
+    if (exp) {
+      exp.forEach(e => {
+        if (!e.date) return;
+        const d = new Date(e.date);
+        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+          total += Number(e.amount || 0);
+        }
+      });
+    }
+
+    // Выводим результат
+    const expElement = document.getElementById('home-expenses');
+    if (expElement) {
+      expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
+    }
   }
 
   // ==========================================
