@@ -404,35 +404,38 @@
     const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
     
     if (vehicles && vehicles.length > 0) {
-    const v = vehicles[0];
-    document.getElementById('home-car-name').textContent = `${v.brand} ${v.model}`;
-    document.getElementById('home-car-mileage').textContent = `Пробег: ${v.current_mileage || 0} км`;
-  } else {
-    document.getElementById('home-car-name').textContent = 'Ещё не добавлен';
-    document.getElementById('home-car-name').style.fontSize = '16px';
-    document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
-  }
+      const v = vehicles[0];
+      document.getElementById('home-car-name').textContent = `${v.brand} ${v.model}`;
+      document.getElementById('home-car-mileage').textContent = `Пробег: ${v.current_mileage || 0} км`;
+    } else {
+      document.getElementById('home-car-name').textContent = 'Ещё не добавлен';
+      document.getElementById('home-car-name').style.fontSize = '16px';
+      document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
+    }
 
-  // Расход по БК
-  if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
-    document.getElementById('home-consumption').textContent =
-      vehicles[0].fuel_consumption + ' л/100 км';
-  } else {
-    document.getElementById('home-consumption').textContent = 'не указан';
-    document.getElementById('home-consumption').style.fontSize = '16px';
-  }
+    // Расход по БК
+    if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
+      document.getElementById('home-consumption').textContent = vehicles[0].fuel_consumption + ' л/100 км';
+      document.getElementById('home-consumption').style.fontSize = '28px';
+    } else {
+      document.getElementById('home-consumption').textContent = 'не указан';
+      document.getElementById('home-consumption').style.fontSize = '16px';
+    }
+
     // Считаем расходы за текущий месяц (ремонты + прочие расходы)
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const firstDay = `${year}-${month}-01`;
     
     const { data: maint } = await db.from('maintenance').select('cost').gte('date', firstDay);
     const { data: exp } = await db.from('expenses').select('amount').gte('date', firstDay);
     
     let total = 0;
-    if (maint) maint.forEach(m => total += Number(m.cost));
-    if (exp) exp.forEach(e => total += Number(e.amount));
+    if (maint) maint.forEach(m => total += Number(m.cost || 0));
+    if (exp) exp.forEach(e => total += Number(e.amount || 0));
 
-    // Ищем карточку "Расходы за месяц" и меняем цифру
+    // Меняем цифру на карточке
     const cards = document.querySelectorAll('#tab-home .card');
     cards.forEach(card => {
       if (card.innerText.includes('Расходы за месяц')) {
