@@ -276,29 +276,10 @@
     window.location.reload();
   }
 
-  // Проверка сессии при загрузке
-  async function init() {
-    const { data: { session } } = await db.auth.getSession();
-    if (session) {
-      document.getElementById('screen-auth').classList.remove('active');
-      document.getElementById('screen-app').classList.add('active');
-    } else {
-      document.getElementById('screen-auth').classList.add('active');
-      document.getElementById('screen-app').classList.remove('active');
-    }
-  }
-
-  // Слушаем изменения входа
-  db.auth.onAuthStateChange((event, session) => {
-    if (session) {
-      document.getElementById('screen-auth').classList.remove('active');
-      document.getElementById('screen-app').classList.add('active');
-    }
-  });
-// === ЛОГИКА ГАРАЖА ===
-  
+  // ==========================================
+  // ЛОГИКА ГАРАЖА
+  // ==========================================
   function openAddVehicle() {
-    // Создаем модальное окно (шторку) прямо в коде, чтобы не менять HTML
     const modal = document.createElement('div');
     modal.id = 'add-vehicle-modal';
     modal.style.cssText = `
@@ -337,7 +318,6 @@
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
 
-    // Получаем текущего пользователя
     const { data: { user } } = await db.auth.getUser();
     
     if (!user) {
@@ -345,7 +325,6 @@
       return;
     }
 
-    // Отправляем в Supabase
     const { error } = await db.from('vehicles').insert({
       user_id: user.id,
       brand: brand,
@@ -362,7 +341,8 @@
     } else {
       document.getElementById('add-vehicle-modal').remove();
       showToast('Автомобиль добавлен!');
-      loadVehicles(); // Обновляем список
+      loadVehicles();
+      loadHome();
     }
   }
 
@@ -390,12 +370,10 @@
 
     empty.style.display = 'none';
     
-    // Очищаем старые карточки (кроме пустого блока)
     Array.from(list.children).forEach(child => {
       if (child.id !== 'vehicles-empty') child.remove();
     });
 
-    // Добавляем новые
     vehicles.forEach(v => {
       const card = document.createElement('div');
       card.className = 'card';
@@ -408,21 +386,13 @@
     });
   }
 
-  // Вызываем загрузку машин, когда приложение открывается
-  // (Внутри функции init мы это тоже добавим, но на всякий случай)
-  const originalInit = init;
-  init = async function() {
-    await originalInit();
-    const { data: { session } } = await db.auth.getSession();
-    if (session) loadVehicles();
-  }
-  
-  // === ОБНОВЛЕНИЕ ГЛАВНОЙ ===
+  // ==========================================
+  // ЛОГИКА ГЛАВНОЙ
+  // ==========================================
   async function loadHome() {
     const { data: { user } } = await db.auth.getUser();
     if (!user) return;
 
-    // Берем первую машину из списка
     const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
     
     if (vehicles && vehicles.length > 0) {
@@ -436,11 +406,12 @@
     }
   }
 
-  // === ЛОГИКА ОБСЛУЖИВАНИЯ ===
-  let currentVehicleId = null; // Запоминаем ID машины для ремонтов
+  // ==========================================
+  // ЛОГИКА ОБСЛУЖИВАНИЯ
+  // ==========================================
+  let currentVehicleId = null;
 
   async function openAddMaint() {
-    // Получаем ID машины (берем первую)
     const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
     if (!vehicles || vehicles.length === 0) {
       showToast('Сначала добавь автомобиль в гараже');
@@ -507,7 +478,7 @@
       document.getElementById('add-maint-modal').remove();
       showToast('Запись добавлена!');
       loadMaint();
-      loadHome(); // Обновляем главную (если пробег изменился, обновим позже)
+      loadHome();
     }
   }
 
@@ -548,17 +519,40 @@
     });
   }
 
-  // Обновляем init, чтобы подгружать всё сразу при входе
-  const originalInit2 = init;
-  init = async function() {
-    await originalInit2();
+  // ==========================================
+  // ИНИЦИАЛИЗАЦИЯ ПРИЛОЖЕНИЯ
+  // ==========================================
+  async function init() {
     const { data: { session } } = await db.auth.getSession();
+    
     if (session) {
+      document.getElementById('screen-auth').classList.remove('active');
+      document.getElementById('screen-app').classList.add('active');
+      
+      // Загружаем все данные разом
       loadHome();
-      loadVehicles(); // Эта функция уже есть у тебя в коде
+      loadVehicles();
       loadMaint();
+    } else {
+      document.getElementById('screen-auth').classList.add('active');
+      document.getElementById('screen-app').classList.remove('active');
     }
   }
+
+  // Слушаем изменения входа (например, после клика по ссылке из письма)
+  db.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      document.getElementById('screen-auth').classList.remove('active');
+      document.getElementById('screen-app').classList.add('active');
+      
+      // Когда пользователь только что вошел, тоже грузим данные
+      loadHome();
+      loadVehicles();
+      loadMaint();
+    }
+  });
+
+  // Запускаем приложение
   init();
 </script>
 </body>
