@@ -162,8 +162,8 @@
       <p style="color: var(--text-dim); font-size: 13px; margin-top: 6px;" id="home-car-mileage">— км</p>
     </div>
     <div class="card">
-      <div class="card-label">Средний расход</div>
-      <div class="card-value accent">— л/100 км</div>
+      <div class="card-label">Расход (по БК)</div>
+      <div class="card-value accent" id="home-consumption">— л/100 км</div>
     </div>
     <div class="card">
       <div class="card-label">Расходы за месяц</div>
@@ -404,15 +404,23 @@
     const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
     
     if (vehicles && vehicles.length > 0) {
-      const v = vehicles[0];
-      document.getElementById('home-car-name').textContent = `${v.brand} ${v.model}`;
-      document.getElementById('home-car-mileage').textContent = `Пробег: ${v.current_mileage || 0} км`;
-    } else {
-      document.getElementById('home-car-name').textContent = 'Ещё не добавлен';
-      document.getElementById('home-car-name').style.fontSize = '16px';
-      document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
-    }
+    const v = vehicles[0];
+    document.getElementById('home-car-name').textContent = `${v.brand} ${v.model}`;
+    document.getElementById('home-car-mileage').textContent = `Пробег: ${v.current_mileage || 0} км`;
+  } else {
+    document.getElementById('home-car-name').textContent = 'Ещё не добавлен';
+    document.getElementById('home-car-name').style.fontSize = '16px';
+    document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
+  }
 
+  // Расход по БК
+  if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
+    document.getElementById('home-consumption').textContent =
+      vehicles[0].fuel_consumption + ' л/100 км';
+  } else {
+    document.getElementById('home-consumption').textContent = 'не указан';
+    document.getElementById('home-consumption').style.fontSize = '16px';
+  }
     // Считаем расходы за текущий месяц (ремонты + прочие расходы)
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
