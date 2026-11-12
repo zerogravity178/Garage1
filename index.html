@@ -738,6 +738,10 @@ async function openUpdateMileage() {
 
     const list = document.getElementById('maint-list');
     const empty = document.getElementById('maint-empty');
+    
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'maint-empty') child.remove();
+    });
 
     if (!records || records.length === 0) {
       empty.style.display = 'block';
@@ -745,9 +749,6 @@ async function openUpdateMileage() {
     }
 
     empty.style.display = 'none';
-    Array.from(list.children).forEach(child => {
-      if (child.id !== 'maint-empty') child.remove();
-    });
 
     records.forEach(r => {
       const card = document.createElement('div');
@@ -881,6 +882,10 @@ async function loadRefuels() {
 
   const list = document.getElementById('refuels-list');
   const empty = document.getElementById('refuels-empty');
+  
+  Array.from(list.children).forEach(child => {
+    if (child.id !== 'refuels-empty') child.remove();
+  });
 
   if (!records || records.length === 0) {
     empty.style.display = 'block';
@@ -889,10 +894,7 @@ async function loadRefuels() {
   }
 
   empty.style.display = 'none';
-  Array.from(list.children).forEach(child => {
-    if (child.id !== 'refuels-empty') child.remove();
-  });
-
+  
   const now = new Date();
   const monthTotal = records
     .filter(r => {
@@ -1070,6 +1072,11 @@ async function deleteRefuel(id) {
 
     const list = document.getElementById('expenses-list');
     const empty = document.getElementById('expenses-empty');
+// Сначала всегда очищаем старые карточки
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'expenses-empty') child.remove();
+    });
+    // А теперь проверяем, есть ли новые запис
 
     if (!records || records.length === 0) {
       empty.style.display = 'block';
@@ -1077,9 +1084,6 @@ async function deleteRefuel(id) {
     }
 
     empty.style.display = 'none';
-    Array.from(list.children).forEach(child => {
-      if (child.id !== 'expenses-empty') child.remove();
-    });
 
     records.forEach(r => {
       const card = document.createElement('div');
