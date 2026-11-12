@@ -479,11 +479,10 @@ async function openEditVehicle(id) {
   // ==========================================
   // ЛОГИКА ГЛАВНОЙ
   // ==========================================
-    async function loadHome() {
+      async function loadHome() {
     const { data: { user } } = await db.auth.getUser();
     if (!user) return;
 
-    // 1. Инфа по машине
     const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
     
     if (vehicles && vehicles.length > 0) {
@@ -496,7 +495,7 @@ async function openEditVehicle(id) {
       document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
     }
 
-    // 2. Расход по БК
+    // Расход по БК
     if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
       document.getElementById('home-consumption').textContent = vehicles[0].fuel_consumption + ' л/100 км';
       document.getElementById('home-consumption').style.fontSize = '28px';
@@ -505,7 +504,7 @@ async function openEditVehicle(id) {
       document.getElementById('home-consumption').style.fontSize = '16px';
     }
 
-    // 3. Считаем расходы за месяц
+    // Считаем расходы
     const { data: maint } = await db.from('maintenance').select('*');
     const { data: exp } = await db.from('expenses').select('*');
     
@@ -539,7 +538,7 @@ async function openEditVehicle(id) {
       expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
     }
 
-    // 4. ЛОГИКА НАПОМИНАНИЙ О ТО
+    // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
     const reminderBox = document.getElementById('reminder-box');
     
     try {
@@ -573,13 +572,12 @@ async function openEditVehicle(id) {
           } else {
             reminderBox.style.display = 'none';
           }
-        } else {
-          if (reminderBox) reminderBox.style.display = 'none';
         }
+      }
     } catch (e) {
       console.log('Ошибка в напоминаниях:', e);
     }
-  }
+  } // <--- ЗДЕСЬ КОНЕЦ ФУНКЦИИ
   
   // ==========================================
   // ЛОГИКА ОБСЛУЖИВАНИЯ
