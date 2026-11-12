@@ -304,6 +304,7 @@
         <input type="number" id="v-year" class="input" placeholder="Год выпуска (например, 2015)">
         <input type="number" id="v-mileage" class="input" placeholder="Текущий пробег (км)">
         <input type="number" id="v-consumption" class="input" placeholder="Расход по БК, л/100 км (необязательно)" step="0.1">
+        <input type="number" id="v-interval" class="input" placeholder="Интервал ТО (км), например 10000" value="10000">
         <button class="btn" onclick="saveVehicle()" id="save-vehicle-btn" style="margin-top: 8px;">Сохранить в облако</button>
       </div>
     `;
@@ -337,6 +338,7 @@ async function openEditVehicle(id) {
         <input type="number" id="ev-year" class="input" placeholder="Год выпуска" value="${v.year || ''}">
         <input type="number" id="ev-mileage" class="input" placeholder="Текущий пробег (км)" value="${v.current_mileage || ''}">
         <input type="number" id="ev-consumption" class="input" placeholder="Расход по БК, л/100 км" step="0.1" value="${v.fuel_consumption || ''}">
+        <input type="number" id="ev-interval" class="input" placeholder="Интервал ТО (км)" value="${v.service_interval || 10000}">
         
         <button class="btn" onclick="updateVehicle('${id}')" id="update-vehicle-btn" style="margin-top: 8px;">Сохранить изменения</button>
       </div>
@@ -365,7 +367,8 @@ async function openEditVehicle(id) {
       model: model,
       year: year ? parseInt(year) : null,
       current_mileage: mileage ? parseInt(mileage) : 0,
-      fuel_consumption: consumption ? parseFloat(consumption) : null
+      fuel_consumption: consumption ? parseFloat(consumption) : null,
+      service_interval: document.getElementById('ev-interval').value ? parseInt(document.getElementById('ev-interval').value) : 10000,
     }).eq('id', id);
 
     btn.textContent = 'Сохранить изменения';
@@ -409,7 +412,8 @@ async function openEditVehicle(id) {
       model: model,
       year: year ? parseInt(year) : null,
       current_mileage: mileage ? parseInt(mileage) : 0,
-      fuel_consumption: document.getElementById('v-consumption').value ? parseFloat(document.getElementById('v-consumption').value) : null
+      fuel_consumption: document.getElementById('v-consumption').value ? parseFloat(document.getElementById('v-consumption').value) : null,
+      service_interval: document.getElementById('v-interval').value ? parseInt(document.getElementById('v-interval').value) : 10000
     });
 
     btn.textContent = 'Сохранить в облако';
