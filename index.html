@@ -386,7 +386,7 @@ async function openEditVehicle(id) {
       document.getElementById('edit-vehicle-modal').remove();
       showToast('Авто обновлено!');
       loadVehicles(); // Обновляем список в гараже
-      loadHome();     // Обновляем инфу на главной
+      ();     // Обновляем инфу на главной
     }
   }
   
@@ -431,7 +431,7 @@ async function openEditVehicle(id) {
       document.getElementById('add-vehicle-modal').remove();
       showToast('Автомобиль добавлен!');
       loadVehicles();
-      loadHome();
+      ();
     }
   }
 
@@ -544,13 +544,6 @@ async function openEditVehicle(id) {
        // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
     const reminderBox = document.getElementById('reminder-box');
     
-    // ТЕСТОВЫЙ БЛОК (УДАЛИТЬ ПОТОМ)
-    if (reminderBox) {
-      reminderBox.style.display = 'block';
-      document.getElementById('reminder-title').textContent = 'Тест напоминания';
-      document.getElementById('reminder-text').textContent = 'Если ты видишь эту плашку, значит HTML на месте и логика работает.';
-    }
-
     // А теперь реальная логика (пока просто спрячем её в try/catch, чтобы ничего не ломала)
     try {
       const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
