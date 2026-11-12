@@ -310,6 +310,77 @@
     document.body.appendChild(modal);
   }
 
+async function openEditVehicle(id) {
+    // Запрашиваем данные конкретной машины из базы
+    const { data: v, error } = await db.from('vehicles').select('*').eq('id', id).single();
+    if (error || !v) {
+      showToast('Ошибка загрузки данных авто');
+      return;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'edit-vehicle-modal';
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      display: flex; flex-direction: column; justify-content: flex-end;
+    `;
+    // Подставляем текущие значения в поля
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+          <div class="section-title" style="margin: 0;">Редактировать авто</div>
+          <button onclick="document.getElementById('edit-vehicle-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+        </div>
+        <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${v.brand || ''}">
+        <input type="text" id="ev-model" class="input" placeholder="Модель" value="${v.model || ''}">
+        <input type="number" id="ev-year" class="input" placeholder="Год выпуска" value="${v.year || ''}">
+        <input type="number" id="ev-mileage" class="input" placeholder="Текущий пробег (км)" value="${v.current_mileage || ''}">
+        <input type="number" id="ev-consumption" class="input" placeholder="Расход по БК, л/100 км" step="0.1" value="${v.fuel_consumption || ''}">
+        
+        <button class="btn" onclick="updateVehicle('${id}')" id="update-vehicle-btn" style="margin-top: 8px;">Сохранить изменения</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  async function updateVehicle(id) {
+    const brand = document.getElementById('ev-brand').value.trim();
+    const model = document.getElementById('ev-model').value.trim();
+    const year = document.getElementById('ev-year').value;
+    const mileage = document.getElementById('ev-mileage').value;
+    const consumption = document.getElementById('ev-consumption').value;
+
+    if (!brand || !model) {
+      showToast('Заполни хотя бы марку и модель');
+      return;
+    }
+
+    const btn = document.getElementById('update-vehicle-btn');
+    btn.textContent = 'Обновляем...';
+    btn.disabled = true;
+
+    const { error } = await db.from('vehicles').update({
+      brand: brand,
+      model: model,
+      year: year ? parseInt(year) : null,
+      current_mileage: mileage ? parseInt(mileage) : 0,
+      fuel_consumption: consumption ? parseFloat(consumption) : null
+    }).eq('id', id);
+
+    btn.textContent = 'Сохранить изменения';
+    btn.disabled = false;
+
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      document.getElementById('edit-vehicle-modal').remove();
+      showToast('Авто обновлено!');
+      loadVehicles(); // Обновляем список в гараже
+      loadHome();     // Обновляем инфу на главной
+    }
+  }
+  
   async function saveVehicle() {
     const brand = document.getElementById('v-brand').value.trim();
     const model = document.getElementById('v-model').value.trim();
@@ -386,9 +457,11 @@
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
+        card.innerHTML = `
         <div class="card-label">${v.year || 'Год не указан'}</div>
         <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${v.brand} ${v.model}</div>
-        <div style="color: var(--text-dim); font-size: 14px;">Пробег: ${v.current_mileage || 0} км</div>
+        <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${v.current_mileage || 0} км</div>
+        <button class="btn" onclick="openEditVehicle('${v.id}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px;">Редактировать</button>
       `;
       list.appendChild(card);
     });
