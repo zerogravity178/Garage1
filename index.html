@@ -541,56 +541,50 @@ async function openEditVehicle(id) {
     if (expElement) {
       expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
     }
-        // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
-    if (vehicles && vehicles.length > 0) {
-            // ТЕСТОВЫЙ БЛОК (УДАЛИТЬ ПОТОМ)
-      document.getElementById('reminder-box').style.display = 'block';
+       // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
+    const reminderBox = document.getElementById('reminder-box');
+    
+    // ТЕСТОВЫЙ БЛОК (УДАЛИТЬ ПОТОМ)
+    if (reminderBox) {
+      reminderBox.style.display = 'block';
       document.getElementById('reminder-title').textContent = 'Тест напоминания';
       document.getElementById('reminder-text').textContent = 'Если ты видишь эту плашку, значит HTML на месте и логика работает.';
-      const v = vehicles[0];
-      
-      // 1. Ищем последнее ТО, где меняли масло (или любое другое)
-      const { data: lastMaint } = await db.from('maintenance')
-        .select('*')
-        .order('mileage', { ascending: false })
-        .limit(1);
+    }
 
-      const reminderBox = document.getElementById('reminder-box');
-      const reminderTitle = document.getElementById('reminder-title');
-      const reminderText = document.getElementById('reminder-text');
+    // А теперь реальная логика (пока просто спрячем её в try/catch, чтобы ничего не ломала)
+    try {
+      const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
+      if (vehiclesData && vehiclesData.length > 0) {
+        const v = vehiclesData[0];
+        const { data: lastMaint } = await db.from('maintenance').select('*').order('mileage', { ascending: false }).limit(1);
 
-      if (lastMaint && lastMaint.length > 0) {
-        const lastMileage = lastMaint[0].mileage; // Пробег на момент последнего ТО
-        const currentMileage = v.current_mileage || 0; // Текущий пробег
-        const interval = v.service_interval || 10000; // Интервал из настроек
-        
-        const kmPassed = currentMileage - lastMileage; // Сколько проехали с момента ТО
-        const kmLeft = interval - kmPassed; // Сколько осталось до следующего
+        if (reminderBox && lastMaint && lastMaint.length > 0) {
+          const lastMileage = lastMaint[0].mileage || 0; 
+          const currentMileage = v.current_mileage || 0;
+          const interval = v.service_interval || 10000;
+          
+          const kmPassed = currentMileage - lastMileage;
+          const kmLeft = interval - kmPassed;
 
-        if (kmLeft <= 0) {
-          // ПРОСРОЧЕНО
-          reminderBox.style.display = 'block';
-          reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
-          reminderBox.style.borderColor = 'var(--danger)';
-          reminderTitle.style.color = 'var(--danger)';
-          reminderTitle.textContent = '⚠️ Пора на ТО!';
-          reminderText.textContent = `Вы проехали ${kmPassed.toLocaleString('ru-RU')} км с последнего ТО. Пора менять масло!`;
-        } else if (kmLeft <= 1000) {
-          // СКОРО (осталось 1000 км или меньше)
-          reminderBox.style.display = 'block';
-          reminderBox.style.background = 'rgba(255, 193, 7, 0.1)'; // Желтый
-          reminderBox.style.borderColor = '#FFC107';
-          reminderTitle.style.color = '#FFC107';
-          reminderTitle.textContent = '🔔 Скоро ТО';
-          reminderText.textContent = `До следующей замены масла осталось ${kmLeft.toLocaleString('ru-RU')} км.`;
-        } else {
-          // ВСЁ ХОРОШО (скрываем)
-          reminderBox.style.display = 'none';
+          if (kmLeft <= 0) {
+            reminderBox.style.display = 'block';
+            reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
+            reminderBox.style.borderColor = 'var(--danger)';
+            document.getElementById('reminder-title').style.color = 'var(--danger)';
+            document.getElementById('reminder-title').textContent = '⚠️ Пора на ТО!';
+            document.getElementById('reminder-text').textContent = `Вы проехали ${kmPassed.toLocaleString('ru-RU')} км с последнего ТО. Пора менять масло!`;
+          } else if (kmLeft <= 1000) {
+            reminderBox.style.display = 'block';
+            reminderBox.style.background = 'rgba(255, 193, 7, 0.1)';
+            reminderBox.style.borderColor = '#FFC107';
+            document.getElementById('reminder-title').style.color = '#FFC107';
+            document.getElementById('reminder-title').textContent = '🔔 Скоро ТО';
+            document.getElementById('reminder-text').textContent = `До следующей замены масла осталось ${kmLeft.toLocaleString('ru-RU')} км.`;
+          }
         }
-      } else {
-        // Если ТО еще не было, просто скрываем плашку
-        reminderBox.style.display = 'none';
       }
+    } catch (e) {
+      console.log('Ошибка в напоминаниях:', e);
     }
   }
 
