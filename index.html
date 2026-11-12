@@ -457,7 +457,6 @@ async function openEditVehicle(id) {
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
-        card.innerHTML = `
         <div class="card-label">${v.year || 'Год не указан'}</div>
         <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${v.brand} ${v.model}</div>
         <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${v.current_mileage || 0} км</div>
