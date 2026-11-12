@@ -751,6 +751,7 @@ async function openUpdateMileage() {
 
     records.forEach(r => {
       const card = document.createElement('div');
+      card.id = 'maint-card-' + r.id;
       card.className = 'card';
       card.style.position = 'relative'; // <--- ДОБАВИЛИ
       card.innerHTML = `
@@ -904,6 +905,7 @@ async function loadRefuels() {
 
   records.forEach(r => {
     const card = document.createElement('div');
+    card.id = 'refuel-card-' + r.id;
     card.className = 'card';
     card.style.position = 'relative';
     const mileageStr = r.mileage ? ' • ' + r.mileage + ' км' : '';
@@ -1081,6 +1083,7 @@ async function deleteRefuel(id) {
 
     records.forEach(r => {
       const card = document.createElement('div');
+      card.id = 'expense-card-' + r.id;
       card.className = 'card';
       card.style.position = 'relative';
       card.innerHTML = `
