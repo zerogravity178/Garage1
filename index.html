@@ -386,7 +386,7 @@ async function openEditVehicle(id) {
       document.getElementById('edit-vehicle-modal').remove();
       showToast('Авто обновлено!');
       loadVehicles(); // Обновляем список в гараже
-      ();     // Обновляем инфу на главной
+      loadHome(); // Обновляем инфу на главной
     }
   }
   
