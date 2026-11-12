@@ -166,6 +166,7 @@
       <div class="card-label">Мой автомобиль</div>
       <div class="card-value" style="font-size: 20px;" id="home-car-name">Загрузка...</div>
       <p style="color: var(--text-dim); font-size: 13px; margin-top: 6px;" id="home-car-mileage">— км</p>
+      <button class="btn" onclick="openUpdateMileage()" style="margin-top: 12px; padding: 10px; font-size: 14px; background: var(--bg); color: var(--text); border: 1px solid var(--border);">Обновить пробег</button>
     </div>
     <div class="card">
       <div class="card-label">Расход (по БК)</div>
@@ -475,7 +476,66 @@ async function openEditVehicle(id) {
       list.appendChild(card);
     });
   }
+async function openUpdateMileage() {
+    // Получаем текущую машину
+    const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
+    if (!vehicles || vehicles.length === 0) return;
+    const v = vehicles[0];
 
+    // Создаем всплывающее окно
+    const modal = document.createElement('div');
+    modal.id = 'update-mileage-modal';
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      display: flex; flex-direction: column; justify-content: flex-end;
+    `;
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+          <div class="section-title" style="margin: 0;">Обновить пробег</div>
+          <button onclick="document.getElementById('update-mileage-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+        </div>
+        <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${v.current_mileage || 0} км</p>
+        
+        <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${v.current_mileage || ''}">
+        
+        <button class="btn" onclick="saveNewMileage('${v.id}')" id="save-mileage-btn" style="margin-top: 8px;">Сохранить</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    
+    // Сразу ставим курсор в поле ввода
+    setTimeout(() => document.getElementById('new-mileage').focus(), 100);
+  }
+
+  async function saveNewMileage(id) {
+    const newMileage = document.getElementById('new-mileage').value;
+    if (!newMileage) {
+      showToast('Введи пробег');
+      return;
+    }
+
+    const btn = document.getElementById('save-mileage-btn');
+    btn.textContent = 'Сохраняем...';
+    btn.disabled = true;
+
+    const { error } = await db.from('vehicles').update({
+      current_mileage: parseInt(newMileage)
+    }).eq('id', id);
+
+    btn.textContent = 'Сохранить';
+    btn.disabled = false;
+
+    if (error) {
+      showToast('Ошибка: ' + error.message);
+    } else {
+      document.getElementById('update-mileage-modal').remove();
+      showToast('Пробег обновлен!');
+      loadHome();     // Обновляем главную (пробег и напоминания)
+      loadVehicles(); // Обновляем гараж
+    }
+  }
   // ==========================================
   // ЛОГИКА ГЛАВНОЙ
   // ==========================================
