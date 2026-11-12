@@ -479,7 +479,7 @@ async function openEditVehicle(id) {
   // ==========================================
   // ЛОГИКА ГЛАВНОЙ
   // ==========================================
-  async function loadHome() {
+    async function loadHome() {
     const { data: { user } } = await db.auth.getUser();
     if (!user) return;
 
@@ -505,7 +505,7 @@ async function openEditVehicle(id) {
       document.getElementById('home-consumption').style.fontSize = '16px';
     }
 
-    // 3. Считаем расходы (без фильтров в базе, фильтруем прямо тут)
+    // 3. Считаем расходы за месяц
     const { data: maint } = await db.from('maintenance').select('*');
     const { data: exp } = await db.from('expenses').select('*');
     
@@ -514,7 +514,6 @@ async function openEditVehicle(id) {
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
-    // Складываем ремонты за текущий месяц
     if (maint) {
       maint.forEach(m => {
         if (!m.date) return;
@@ -525,7 +524,6 @@ async function openEditVehicle(id) {
       });
     }
     
-    // Складываем прочие расходы за текущий месяц
     if (exp) {
       exp.forEach(e => {
         if (!e.date) return;
@@ -536,15 +534,14 @@ async function openEditVehicle(id) {
       });
     }
 
-    // Выводим результат
     const expElement = document.getElementById('home-expenses');
     if (expElement) {
       expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
     }
-       // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
+
+    // 4. ЛОГИКА НАПОМИНАНИЙ О ТО
     const reminderBox = document.getElementById('reminder-box');
     
-    // А теперь реальная логика (пока просто спрячем её в try/catch, чтобы ничего не ломала)
     try {
       const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
       if (vehiclesData && vehiclesData.length > 0) {
@@ -573,14 +570,18 @@ async function openEditVehicle(id) {
             document.getElementById('reminder-title').style.color = '#FFC107';
             document.getElementById('reminder-title').textContent = '🔔 Скоро ТО';
             document.getElementById('reminder-text').textContent = `До следующей замены масла осталось ${kmLeft.toLocaleString('ru-RU')} км.`;
+          } else {
+            reminderBox.style.display = 'none';
           }
+        } else {
+          if (reminderBox) reminderBox.style.display = 'none';
         }
       }
     } catch (e) {
       console.log('Ошибка в напоминаниях:', e);
     }
   }
-
+  
   // ==========================================
   // ЛОГИКА ОБСЛУЖИВАНИЯ
   // ==========================================
