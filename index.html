@@ -598,45 +598,79 @@ async function openUpdateMileage() {
       expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
     }
 
-    // === ЛОГИКА НАПОМИНАНИЙ О ТО ===
-    const reminderBox = document.getElementById('reminder-box');
-    
-    try {
-      const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
-      if (vehiclesData && vehiclesData.length > 0) {
-        const v = vehiclesData[0];
-        const { data: lastMaint } = await db.from('maintenance').select('*').order('mileage', { ascending: false }).limit(1);
+    // === ЛОГИКА НАПОМИНАНИЙ О ТО (по видам работ) ===
+const reminderBox = document.getElementById('reminder-box');
+try {
+  const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
+  if (!vehiclesData || vehiclesData.length === 0) {
+    if (reminderBox) reminderBox.style.display = 'none';
+    return; // выходим из функции, если авто нет
+  }
 
-        if (reminderBox && lastMaint && lastMaint.length > 0) {
-          const lastMileage = lastMaint[0].mileage || 0; 
-          const currentMileage = v.current_mileage || 0;
-          const interval = v.service_interval || 10000;
-          
-          const kmPassed = currentMileage - lastMileage;
-          const kmLeft = interval - kmPassed;
+  const v = vehiclesData[0];
+  const currentMileage = v.current_mileage || 0;
 
-          if (kmLeft <= 0) {
-            reminderBox.style.display = 'block';
-            reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
-            reminderBox.style.borderColor = 'var(--danger)';
-            document.getElementById('reminder-title').style.color = 'var(--danger)';
-            document.getElementById('reminder-title').textContent = '⚠️ Пора на ТО!';
-            document.getElementById('reminder-text').textContent = `Вы проехали ${kmPassed.toLocaleString('ru-RU')} км с последнего ТО. Пора менять масло!`;
-          } else if (kmLeft <= 1000) {
-            reminderBox.style.display = 'block';
-            reminderBox.style.background = 'rgba(255, 193, 7, 0.1)';
-            reminderBox.style.borderColor = '#FFC107';
-            document.getElementById('reminder-title').style.color = '#FFC107';
-            document.getElementById('reminder-title').textContent = '🔔 Скоро ТО';
-            document.getElementById('reminder-text').textContent = `До следующей замены масла осталось ${kmLeft.toLocaleString('ru-RU')} км.`;
-          } else {
-            reminderBox.style.display = 'none';
-          }
-        }
+  // Загружаем все виды работ пользователя
+  const { data: types } = await db.from('service_types').select('*');
+  
+  if (!types || types.length === 0) {
+    // Видов работ нет — нечего напоминать
+    if (reminderBox) reminderBox.style.display = 'none';
+  } else {
+    // Для каждого вида работ ищем последнюю запись ТО
+    let mostCritical = null; // самая критичная позиция
+
+    for (const type of types) {
+      const { data: lastRecords } = await db
+        .from('maintenance')
+        .select('*')
+        .eq('service_type_id', type.id)
+        .order('mileage', { ascending: false })
+        .limit(1);
+
+      // Если по этому виду ещё не было ТО — считаем от 0 (или от пробега покупки)
+      const lastMileage = (lastRecords && lastRecords.length > 0) ? lastRecords[0].mileage : 0;
+      const kmPassed = currentMileage - lastMileage;
+      const kmLeft = type.interval_km - kmPassed;
+
+      // Сохраняем самую критичную позицию (минимальный остаток)
+      if (!mostCritical || kmLeft < mostCritical.kmLeft) {
+        mostCritical = {
+          name: type.name,
+          interval: type.interval_km,
+          lastMileage: lastMileage,
+          kmPassed: kmPassed,
+          kmLeft: kmLeft
+        };
       }
-    } catch (e) {
-      console.log('Ошибка в напоминаниях:', e);
     }
+
+    // Показываем напоминание по самой критичной позиции
+    if (mostCritical) {
+      if (mostCritical.kmLeft <= 0) {
+        reminderBox.style.display = 'block';
+        reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
+        reminderBox.style.borderColor = 'var(--danger)';
+        document.getElementById('reminder-title').style.color = 'var(--danger)';
+        document.getElementById('reminder-title').textContent = '⚠️ Пора на ТО!';
+        document.getElementById('reminder-text').textContent =
+          `${mostCritical.name}: проехали ${mostCritical.kmPassed.toLocaleString('ru-RU')} км из ${mostCritical.interval.toLocaleString('ru-RU')} км. Пора менять!`;
+      } else if (mostCritical.kmLeft <= 1000) {
+        reminderBox.style.display = 'block';
+        reminderBox.style.background = 'rgba(255, 193, 7, 0.1)';
+        reminderBox.style.borderColor = '#FFC107';
+        document.getElementById('reminder-title').style.color = '#FFC107';
+        document.getElementById('reminder-title').textContent = '🔔 Скоро ТО';
+        document.getElementById('reminder-text').textContent =
+          `${mostCritical.name}: до следующей замены осталось ${mostCritical.kmLeft.toLocaleString('ru-RU')} км.`;
+      } else {
+        reminderBox.style.display = 'none';
+      }
+    }
+  }
+} catch (e) {
+  console.log('Ошибка в напоминаниях:', e);
+}
   } // <--- ЗДЕСЬ КОНЕЦ ФУНКЦИИ
   
   // ==========================================
