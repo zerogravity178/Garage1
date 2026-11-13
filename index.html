@@ -696,6 +696,7 @@ async function openUpdateMileage() {
     const mileage = document.getElementById('m-mileage').value;
     const cost = document.getElementById('m-cost').value;
     const comment = document.getElementById('m-comment').value.trim();
+    const typeId = document.getElementById('m-type').value || null;
 
     if (!title || !date || !mileage) {
       showToast('Заполни название, дату и пробег');
@@ -713,7 +714,8 @@ async function openUpdateMileage() {
       date: date,
       mileage: parseInt(mileage),
       cost: cost ? parseFloat(cost) : 0,
-      comment: comment
+      comment: comment,
+      service_type_id: typeId
     });
 
     btn.textContent = 'Сохранить';
