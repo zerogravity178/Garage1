@@ -685,6 +685,7 @@ async function openUpdateMileage() {
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
         
         <button class="btn" onclick="saveMaint()" id="save-maint-btn" style="margin-top: 8px;">Сохранить</button>
+        <button class="btn" onclick="openAddServiceType()" style="margin-top: 8px; background: transparent; color: var(--text); border: 1px solid var(--border);">+ Создать вид работ (например, Замена масла)</button>
       </div>
     `;
     document.body.appendChild(modal);
@@ -740,6 +741,60 @@ async function openUpdateMileage() {
       loadHome(); // Главная обновится и покажет новый пробег
     }
   } // <--- ЗДЕСЬ БЫЛА ПОТЕРЯНА СКОБКА, ТЕПЕРЬ ОНА НА МЕСТЕ
+
+function openAddServiceType() {
+    const m = document.createElement('div');
+    m.id = 'add-st-modal';
+    m.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(14,15,17,.9); z-index:1001; display:flex; flex-direction:column; justify-content:flex-end;';
+    m.innerHTML = `
+      <div style="background:var(--card); border-radius:24px 24px 0 0; padding:24px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+          <div class="section-title" style="margin:0;">Новый вид работ</div>
+          <button onclick="document.getElementById('add-st-modal').remove()" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
+        </div>
+        <input type="text" id="st-name" class="input" placeholder="Название (например, Замена масла)">
+        <input type="number" id="st-interval" class="input" placeholder="Интервал (км), например 10000" value="10000">
+        <button class="btn" onclick="saveServiceType()" id="save-st-btn" style="margin-top: 8px;">Сохранить вид работ</button>
+      </div>
+    `;
+    document.body.appendChild(m);
+  }
+
+  async function saveServiceType() {
+    const name = document.getElementById('st-name').value.trim();
+    const interval = parseInt(document.getElementById('st-interval').value);
+    
+    if (!name || !interval) { 
+      showToast('Заполни название и интервал'); 
+      return; 
+    }
+    
+    const btn = document.getElementById('save-st-btn');
+    btn.textContent = 'Сохраняем...';
+    btn.disabled = true;
+
+    const { error } = await db.from('service_types').insert({
+      user_id: (await db.auth.getUser()).data.user.id,
+      name: name, 
+      interval_km: interval
+    });
+    
+    if (error) { 
+      showToast('Ошибка: ' + error.message); 
+      btn.textContent = 'Сохранить вид работ';
+      btn.disabled = false;
+      return; 
+    }
+    
+    // Закрываем окно создания вида работ и окно создания ТО
+    document.getElementById('add-st-modal').remove();
+    document.getElementById('add-maint-modal').remove();
+    
+    showToast('Вид работ добавлен!');
+    
+    // Переоткрываем окно ТО, чтобы новый вид работ появился в списке
+    openAddMaint(); 
+  }
 
   async function loadMaint() {
     const { data: { user } } = await db.auth.getUser();
