@@ -137,13 +137,39 @@
 <div id="screen-auth" class="screen active">
   <div class="auth-box">
     <h1>MY <span style="color: var(--accent)">GARAGE</span></h1>
-    <p>Войди, чтобы получить доступ к своему гаражу.</p>
-    
-    <button class="btn" onclick="loginWithGitHub()" style="background: #24292e; color: white; display: flex; align-items: center; justify-content: center; gap: 10px;">
-      <svg height="20" width="20" viewBox="0 0 16 16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
-      Войти через GitHub
-    </button>
-    <p style="margin-top: 20px; font-size: 13px;">Письма больше не нужны.</p>
+    <p id="auth-subtitle">Войди или создай аккаунт, чтобы получить доступ к своему гаражу.</p>
+
+    <!-- Форма входа -->
+    <div id="auth-login-form">
+      <input type="email" id="auth-email" class="input" placeholder="Email" autocomplete="email">
+      <input type="password" id="auth-password" class="input" placeholder="Пароль" autocomplete="current-password">
+      <button class="btn" onclick="loginWithPassword()" id="login-btn">Войти</button>
+      <p style="margin-top: 16px; font-size: 14px; color: var(--text-dim);">
+        Нет аккаунта?
+        <a href="#" onclick="showRegister(); return false;" style="color: var(--accent); text-decoration: none; font-weight: 600;">Создать</a>
+      </p>
+    </div>
+
+    <!-- Форма регистрации -->
+    <div id="auth-register-form" style="display: none;">
+      <input type="email" id="reg-email" class="input" placeholder="Email" autocomplete="email">
+      <input type="password" id="reg-password" class="input" placeholder="Пароль (минимум 6 символов)" autocomplete="new-password">
+      <input type="password" id="reg-password2" class="input" placeholder="Повтори пароль" autocomplete="new-password">
+      <button class="btn" onclick="registerWithPassword()" id="register-btn">Создать аккаунт</button>
+      <p style="margin-top: 16px; font-size: 14px; color: var(--text-dim);">
+        Уже есть аккаунт?
+        <a href="#" onclick="showLogin(); return false;" style="color: var(--accent); text-decoration: none; font-weight: 600;">Войти</a>
+      </p>
+    </div>
+
+    <!-- Разделитель и GitHub как альтернатива -->
+    <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border);">
+      <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 12px;">или</p>
+      <button class="btn" onclick="loginWithGitHub()" style="background: #24292e; color: white; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <svg height="20" width="20" viewBox="0 0 16 16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        Войти через GitHub
+      </button>
+    </div>
   </div>
 </div>
 
@@ -276,6 +302,89 @@
     });
     if (error) showToast('Ошибка: ' + error.message);
   }
+  // ==========================================
+// АВТОРИЗАЦИЯ ПО EMAIL + ПАРОЛЮ
+// ==========================================
+function showRegister() {
+  document.getElementById('auth-login-form').style.display = 'none';
+  document.getElementById('auth-register-form').style.display = 'block';
+  document.getElementById('auth-subtitle').textContent = 'Создай аккаунт — это займет 10 секунд.';
+}
+
+function showLogin() {
+  document.getElementById('auth-login-form').style.display = 'block';
+  document.getElementById('auth-register-form').style.display = 'none';
+  document.getElementById('auth-subtitle').textContent = 'Войди или создай аккаунт, чтобы получить доступ к своему гаражу.';
+}
+
+async function registerWithPassword() {
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const password2 = document.getElementById('reg-password2').value;
+
+  if (!email || !password) {
+    showToast('Заполни email и пароль');
+    return;
+  }
+  if (password.length < 6) {
+    showToast('Пароль должен быть минимум 6 символов');
+    return;
+  }
+  if (password !== password2) {
+    showToast('Пароли не совпадают');
+    return;
+  }
+
+  const btn = document.getElementById('register-btn');
+  btn.textContent = 'Создаем...';
+  btn.disabled = true;
+
+  const { error } = await db.auth.signUp({ email, password });
+
+  btn.textContent = 'Создать аккаунт';
+  btn.disabled = false;
+
+  if (error) {
+    showToast('Ошибка: ' + error.message);
+    return;
+  }
+
+  showToast('Аккаунт создан! Входим...');
+  // Если confirm email отключен — сессия создастся сразу,
+  // и onAuthStateChange переключит экран. Если нет — просим войти.
+  setTimeout(async () => {
+    const { data: { session } } = await db.auth.getSession();
+    if (!session) {
+      showToast('Аккаунт создан. Теперь войди.');
+      showLogin();
+    }
+  }, 500);
+}
+
+async function loginWithPassword() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+
+  if (!email || !password) {
+    showToast('Заполни email и пароль');
+    return;
+  }
+
+  const btn = document.getElementById('login-btn');
+  btn.textContent = 'Входим...';
+  btn.disabled = true;
+
+  const { error } = await db.auth.signInWithPassword({ email, password });
+
+  btn.textContent = 'Войти';
+  btn.disabled = false;
+
+  if (error) {
+    showToast('Ошибка: ' + error.message);
+    return;
+  }
+  // onAuthStateChange переключит экран автоматически
+}
 
   function switchTab(name, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
