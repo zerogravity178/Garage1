@@ -51,6 +51,7 @@
       transition: background 0.15s;
     }
     .btn:active { background: var(--accent-dim); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .btn-outline {
       background: transparent;
       color: var(--text);
@@ -68,6 +69,7 @@
       outline: none;
     }
     .input:focus { border-color: var(--accent); }
+    select.input { appearance: none; -webkit-appearance: none; }
     .card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -182,12 +184,16 @@
 
   <!-- ГЛАВНАЯ -->
   <div id="tab-home" class="tab-content">
-        <!-- Блок напоминаний -->
+    <!-- Блок напоминаний -->
     <div id="reminder-box" style="display: none; background: rgba(255, 90, 95, 0.1); border: 1px solid var(--danger); border-radius: 18px; padding: 20px; margin-bottom: 20px;">
       <div style="font-size: 20px; margin-bottom: 4px;">⚠️</div>
       <div style="color: var(--danger); font-weight: 700; font-size: 16px; margin-bottom: 4px;" id="reminder-title">Пора на ТО!</div>
       <div style="font-size: 14px; color: var(--text);" id="reminder-text">Текст напоминания</div>
     </div>
+
+    <!-- C1: выбор активного автомобиля (скрыт, если машина одна) -->
+    <select id="active-vehicle-select" class="input" style="margin-bottom: 12px; display: none;" onchange="setActiveVehicle(this.value)"></select>
+
     <div class="card" id="home-car-card">
       <div class="card-label">Мой автомобиль</div>
       <div class="card-value" style="font-size: 20px;" id="home-car-name">Загрузка...</div>
@@ -210,7 +216,7 @@
       <div class="section-title" style="margin-bottom: 0;">Мой гараж</div>
       <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddVehicle()">+ Добавить</button>
     </div>
-    
+
     <div id="vehicles-list">
       <!-- Здесь будут появляться карточки машин -->
       <div class="empty" id="vehicles-empty">Пока пусто.<br>Нажми «Добавить», чтобы внести машину.</div>
@@ -223,7 +229,7 @@
       <div class="section-title" style="margin-bottom: 0;">Обслуживание</div>
       <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddMaint()">+ Добавить</button>
     </div>
-    
+
     <div id="maint-list">
       <div class="empty" id="maint-empty">Пока пусто.<br>Нажми «Добавить», чтобы записать ремонт.</div>
     </div>
@@ -235,13 +241,12 @@
       <div class="section-title" style="margin-bottom: 0;">Расходы</div>
       <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddExpense()">+ Добавить</button>
     </div>
-    
+
     <div id="expenses-list">
       <div class="empty" id="expenses-empty">Пока пусто.<br>Нажми «Добавить», чтобы записать трату.</div>
     </div>
   </div>
 
-  <!-- ЗАПРАВКИ -->
   <!-- ЗАПРАВКИ -->
   <div id="tab-refuels" class="tab-content" style="display: none;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -280,128 +285,284 @@
 </div>
 
 <script>
-  // ЗАМЕНИ НА СВОИ ЗНАЧЕНИЯ ИЗ SUPABASE
+  // ==========================================
+  // КОНСТАНТЫ И КЛИЕНТ SUPABASE
+  // ==========================================
   const SUPABASE_URL = 'https://zdhbzoprpjosfvuhhcfp.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_06KosIFn6iYptw38XQSpSQ_ZsJ9CAqh';
 
   const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  // C1: активный автомобиль — единый источник истины для всех запросов
+  let activeVehicleId = localStorage.getItem('my_garage_active_vehicle') || null;
+
+  // M5: синхронный флаг для модалок, которые открываются после await
+  let maintModalOpening = false;
+  let editVehicleModalOpening = false;
+  let mileageModalOpening = false;
+
+  // Автомобиль, для которого открыта форма ТО: фиксируется при открытии,
+  // чтобы смена активного авто не перенаправила сохраняемую запись.
+  let maintFormVehicleId = null;
+  let refuelFormVehicleId = null;
+  let expenseFormVehicleId = null;
+
+  // C4: экранирование пользовательских данных перед вставкой в HTML
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Приведение чисел (в базе numeric приходит строкой)
+  const num = (v, def = 0) => {
+    if (v === null || v === undefined || v === '') return def;
+    const n = Number(typeof v === 'string' ? v.replace(',', '.') : v);
+    return Number.isFinite(n) ? n : def;
+  };
+  const fmtNum = (v) => num(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+  const fmtMoney = (v) => fmtNum(v) + ' ₽';
+
+  // Даты: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса
+  function formatDate(s) {
+    if (!s) return '—';
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU');
+  }
+  function currentMonthKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  function inCurrentMonth(s) {
+    if (!s) return false;
+    return String(s).slice(0, 7) === currentMonthKey();
+  }
+
+  // L2: перезапускаемый таймер тоста
+  let toastTimer = null;
   function showToast(msg) {
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 3000);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      t.classList.remove('show');
+      toastTimer = null;
+    }, 3000);
   }
 
-  async function loginWithGitHub() {
-    const { error } = await db.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: window.location.href
-      }
-    });
-    if (error) showToast('Ошибка: ' + error.message);
+  // Надёжность: защита от двойного сохранения (двойной клик / двойной вызов).
+  // Блокировка ставится СИНХРОННО, до первого await, иначе два обработчика
+  // успевают пройти проверку и вставить две одинаковые записи.
+  const saveLocks = Object.create(null);
+  function acquireSave(key) {
+    if (saveLocks[key]) return false;
+    saveLocks[key] = true;
+    return true;
   }
+  function releaseSave(key) {
+    saveLocks[key] = false;
+  }
+
   // ==========================================
-// АВТОРИЗАЦИЯ ПО EMAIL + ПАРОЛЮ
-// ==========================================
-function showRegister() {
-  document.getElementById('auth-login-form').style.display = 'none';
-  document.getElementById('auth-register-form').style.display = 'block';
-  document.getElementById('auth-subtitle').textContent = 'Создай аккаунт — это займет 10 секунд.';
-}
-
-function showLogin() {
-  document.getElementById('auth-login-form').style.display = 'block';
-  document.getElementById('auth-register-form').style.display = 'none';
-  document.getElementById('auth-subtitle').textContent = 'Войди или создай аккаунт, чтобы получить доступ к своему гаражу.';
-}
-
-async function registerWithPassword() {
-  const email = document.getElementById('reg-email').value.trim();
-  const password = document.getElementById('reg-password').value;
-  const password2 = document.getElementById('reg-password2').value;
-
-  if (!email || !password) {
-    showToast('Заполни email и пароль');
-    return;
-  }
-  if (password.length < 6) {
-    showToast('Пароль должен быть минимум 6 символов');
-    return;
-  }
-  if (password !== password2) {
-    showToast('Пароли не совпадают');
-    return;
-  }
-
-  const btn = document.getElementById('register-btn');
-  btn.textContent = 'Создаем...';
-  btn.disabled = true;
-
-  const { error } = await db.auth.signUp({ email, password });
-
-  btn.textContent = 'Создать аккаунт';
-  btn.disabled = false;
-
-  if (error) {
-    showToast('Ошибка: ' + error.message);
-    return;
-  }
-
-  showToast('Аккаунт создан! Входим...');
-  // Если confirm email отключен — сессия создастся сразу,
-  // и onAuthStateChange переключит экран. Если нет — просим войти.
-  setTimeout(async () => {
-    const { data: { session } } = await db.auth.getSession();
-    if (!session) {
-      showToast('Аккаунт создан. Теперь войди.');
-      showLogin();
+  // АВТОРИЗАЦИЯ
+  // ==========================================
+  async function loginWithGitHub() {
+    try {
+      const { error } = await db.auth.signInWithOAuth({
+        provider: 'github',
+        options: { redirectTo: window.location.href }
+      });
+      if (error) showToast('Ошибка: ' + error.message);
+    } catch (e) {
+      showToast('Нет связи с сервером. Проверь интернет.');
     }
-  }, 500);
-}
-
-async function loginWithPassword() {
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
-
-  if (!email || !password) {
-    showToast('Заполни email и пароль');
-    return;
   }
 
-  const btn = document.getElementById('login-btn');
-  btn.textContent = 'Входим...';
-  btn.disabled = true;
-
-  const { error } = await db.auth.signInWithPassword({ email, password });
-
-  btn.textContent = 'Войти';
-  btn.disabled = false;
-
-  if (error) {
-    showToast('Ошибка: ' + error.message);
-    return;
+  function showRegister() {
+    document.getElementById('auth-login-form').style.display = 'none';
+    document.getElementById('auth-register-form').style.display = 'block';
+    document.getElementById('auth-subtitle').textContent = 'Создай аккаунт — это займет 10 секунд.';
   }
-  // onAuthStateChange переключит экран автоматически
-}
 
+  function showLogin() {
+    document.getElementById('auth-login-form').style.display = 'block';
+    document.getElementById('auth-register-form').style.display = 'none';
+    document.getElementById('auth-subtitle').textContent = 'Войди или создай аккаунт, чтобы получить доступ к своему гаражу.';
+  }
+
+  async function registerWithPassword() {
+    const email = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const password2 = document.getElementById('reg-password2').value;
+
+    if (!email || !password) {
+      showToast('Заполни email и пароль');
+      return;
+    }
+    if (password.length < 6) {
+      showToast('Пароль должен быть минимум 6 символов');
+      return;
+    }
+    if (password !== password2) {
+      showToast('Пароли не совпадают');
+      return;
+    }
+
+    const btn = document.getElementById('register-btn');
+    btn.textContent = 'Создаем...';
+    btn.disabled = true;
+
+    try {
+      const { error } = await db.auth.signUp({ email, password });
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
+      showToast('Аккаунт создан! Входим...');
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      btn.textContent = 'Создать аккаунт';
+      btn.disabled = false;
+    }
+
+    setTimeout(async () => {
+      try {
+        const { data } = await db.auth.getSession();
+        if (!data || !data.session) {
+          showToast('Аккаунт создан. Теперь войди.');
+          showLogin();
+        }
+      } catch (e) {
+        showLogin();
+      }
+    }, 500);
+  }
+
+  async function loginWithPassword() {
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+
+    if (!email || !password) {
+      showToast('Заполни email и пароль');
+      return;
+    }
+
+    const btn = document.getElementById('login-btn');
+    btn.textContent = 'Входим...';
+    btn.disabled = true;
+
+    try {
+      const { error } = await db.auth.signInWithPassword({ email, password });
+      if (error) showToast('Ошибка: ' + error.message);
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      btn.textContent = 'Войти';
+      btn.disabled = false;
+    }
+  }
+
+  async function logout() {
+    try {
+      const { error } = await db.auth.signOut();
+      if (error) {
+        // Сессия не закрылась — не перезагружаем страницу, иначе пользователь
+        // останется в системе и не поймёт, что выход не сработал.
+        showToast('Не удалось выйти: ' + error.message);
+        return;
+      }
+    } catch (e) {
+      showToast('Не удалось выйти. Проверь интернет.');
+      return;
+    }
+    window.location.reload();
+  }
+
+  // C7: безопасное получение id пользователя (не падаем при истёкшей сессии)
+  async function getUserId() {
+    try {
+      const { data, error } = await db.auth.getUser();
+      if (error || !data || !data.user) {
+        showToast('Сессия истекла. Войди заново.');
+        return null;
+      }
+      return data.user.id;
+    } catch (e) {
+      showToast('Нет связи с сервером');
+      return null;
+    }
+  }
+
+  // ==========================================
+  // ЭКРАНЫ И НАВИГАЦИЯ
+  // ==========================================
   function switchTab(name, btn) {
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
     document.getElementById('tab-' + name).style.display = 'block';
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    btn.classList.add('active');
+    if (btn) btn.classList.add('active');
   }
 
-  async function logout() {
-    await db.auth.signOut();
-    window.location.reload();
+  function showAppScreen() {
+    document.getElementById('screen-auth').classList.remove('active');
+    document.getElementById('screen-app').classList.add('active');
+  }
+
+  function showAuthScreen() {
+    document.getElementById('screen-auth').classList.add('active');
+    document.getElementById('screen-app').classList.remove('active');
+  }
+
+  // C5: полная очистка списков (чтобы не оставались карточки прошлого аккаунта)
+  function clearAllLists() {
+    [['vehicles-list', 'vehicles-empty'], ['maint-list', 'maint-empty'], ['expenses-list', 'expenses-empty'], ['refuels-list', 'refuels-empty']]
+      .forEach(([listId, emptyId]) => {
+        const list = document.getElementById(listId);
+        if (!list) return;
+        Array.from(list.children).forEach(child => { if (child.id !== emptyId) child.remove(); });
+        const empty = document.getElementById(emptyId);
+        if (empty) empty.style.display = 'none';
+      });
+    const sel = document.getElementById('active-vehicle-select');
+    if (sel) { sel.innerHTML = ''; sel.style.display = 'none'; }
+  }
+
+  // C1: переключение активного автомобиля
+  async function setActiveVehicle(id) {
+    if (!id) return;
+    activeVehicleId = id;
+    localStorage.setItem('my_garage_active_vehicle', id);
+    const sel = document.getElementById('active-vehicle-select');
+    if (sel) sel.value = id;
+    // перерисовываем карточки гаража, чтобы метка «активный» была на нужной машине
+    await loadVehicles();
+    loadHome();
+    loadMaint();
+    loadExpenses();
+    loadRefuels();
+  }
+
+  // C1: заполнение селектора автомобилей на главной
+  function renderVehicleSelect(vehicles) {
+    const sel = document.getElementById('active-vehicle-select');
+    if (!sel) return;
+    sel.innerHTML = (vehicles || []).map(v =>
+      `<option value="${esc(v.id)}">${esc(v.brand || '')} ${esc(v.model || '')}</option>`
+    ).join('');
+    if (vehicles && vehicles.length > 1) {
+      sel.style.display = 'block';
+      sel.value = activeVehicleId || '';
+    } else {
+      sel.style.display = 'none';
+    }
   }
 
   // ==========================================
-  // ЛОГИКА ГАРАЖА
+  // ГАРАЖ
   // ==========================================
   function openAddVehicle() {
+    if (document.getElementById('add-vehicle-modal')) return; // M5: защита от двойного клика
+
     const modal = document.createElement('div');
     modal.id = 'add-vehicle-modal';
     modal.style.cssText = `
@@ -427,11 +588,21 @@ async function loginWithPassword() {
     document.body.appendChild(modal);
   }
 
-async function openEditVehicle(id) {
-    // Запрашиваем данные конкретной машины из базы
-    const { data: v, error } = await db.from('vehicles').select('*').eq('id', id).single();
-    if (error || !v) {
-      showToast('Ошибка загрузки данных авто');
+  async function openEditVehicle(id) {
+    if (editVehicleModalOpening || document.getElementById('edit-vehicle-modal')) return; // M5
+    editVehicleModalOpening = true;
+
+    let v = null;
+    try {
+      const { data, error } = await db.from('vehicles').select('*').eq('id', id).maybeSingle();
+      if (error) console.error(error);
+      v = data;
+    } catch (e) {
+      console.error(e);
+    }
+    if (!v) {
+      editVehicleModalOpening = false;
+      showToast('Не удалось загрузить данные авто');
       return;
     }
 
@@ -442,24 +613,24 @@ async function openEditVehicle(id) {
       background: rgba(14, 15, 17, 0.9); z-index: 1000;
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
-    // Подставляем текущие значения в поля
     modal.innerHTML = `
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Редактировать авто</div>
           <button onclick="document.getElementById('edit-vehicle-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
-        <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${v.brand || ''}">
-        <input type="text" id="ev-model" class="input" placeholder="Модель" value="${v.model || ''}">
-        <input type="number" id="ev-year" class="input" placeholder="Год выпуска" value="${v.year || ''}">
-        <input type="number" id="ev-mileage" class="input" placeholder="Текущий пробег (км)" value="${v.current_mileage || ''}">
-        <input type="number" id="ev-consumption" class="input" placeholder="Расход по БК, л/100 км" step="0.1" value="${v.fuel_consumption || ''}">
-        <input type="number" id="ev-interval" class="input" placeholder="Интервал ТО (км)" value="${v.service_interval || 10000}">
-        
-        <button class="btn" onclick="updateVehicle('${id}')" id="update-vehicle-btn" style="margin-top: 8px;">Сохранить изменения</button>
+        <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${esc(v.brand || '')}">
+        <input type="text" id="ev-model" class="input" placeholder="Модель" value="${esc(v.model || '')}">
+        <input type="number" id="ev-year" class="input" placeholder="Год выпуска" value="${v.year === null || v.year === undefined ? '' : esc(v.year)}">
+        <input type="number" id="ev-mileage" class="input" placeholder="Текущий пробег (км)" value="${v.current_mileage === null || v.current_mileage === undefined ? '' : esc(v.current_mileage)}">
+        <input type="number" id="ev-consumption" class="input" placeholder="Расход по БК, л/100 км" step="0.1" value="${v.fuel_consumption === null || v.fuel_consumption === undefined ? '' : esc(v.fuel_consumption)}">
+        <input type="number" id="ev-interval" class="input" placeholder="Интервал ТО (км)" value="${v.service_interval === null || v.service_interval === undefined ? 10000 : esc(v.service_interval)}">
+
+        <button class="btn" onclick="updateVehicle('${esc(id)}')" id="update-vehicle-btn" style="margin-top: 8px;">Сохранить изменения</button>
       </div>
     `;
     document.body.appendChild(modal);
+    editVehicleModalOpening = false;
   }
 
   async function updateVehicle(id) {
@@ -468,9 +639,35 @@ async function openEditVehicle(id) {
     const year = document.getElementById('ev-year').value;
     const mileage = document.getElementById('ev-mileage').value;
     const consumption = document.getElementById('ev-consumption').value;
+    const interval = document.getElementById('ev-interval').value;
 
     if (!brand || !model) {
       showToast('Заполни хотя бы марку и модель');
+      return;
+    }
+    if (mileage !== '' && (!Number.isFinite(Number(mileage)) || Number(mileage) < 0)) {
+      showToast('Пробег должен быть положительным числом');
+      return;
+    }
+
+    // C6: очистка поля пробега не должна молча стирать одометр
+    if (mileage === '') {
+      if (!confirm('Поле пробега пустое. Сохранить авто без пробега?')) return;
+    } else {
+      const { data: cur } = await db.from('vehicles').select('current_mileage').eq('id', id).maybeSingle();
+      const currentMileage = cur && cur.current_mileage ? Number(cur.current_mileage) : 0;
+      const newMileage = parseInt(mileage, 10);
+      if (currentMileage > 0 && newMileage < currentMileage) {
+        if (!confirm(`Текущий пробег ${currentMileage} км. Новое значение меньше.\nПоставить ${newMileage} км?`)) return;
+      }
+    }
+
+    if (!acquireSave('updateVehicle')) return;
+
+    // C8: изменяем только свою запись
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('updateVehicle');
       return;
     }
 
@@ -478,28 +675,39 @@ async function openEditVehicle(id) {
     btn.textContent = 'Обновляем...';
     btn.disabled = true;
 
-    const { error } = await db.from('vehicles').update({
-      brand: brand,
-      model: model,
-      year: year ? parseInt(year) : null,
-      current_mileage: mileage ? parseInt(mileage) : 0,
-      fuel_consumption: consumption ? parseFloat(consumption) : null,
-      service_interval: document.getElementById('ev-interval').value ? parseInt(document.getElementById('ev-interval').value) : 10000,
-    }).eq('id', id);
+    try {
+      const { error } = await db.from('vehicles').update({
+        brand: brand,
+        model: model,
+        year: year ? parseInt(year, 10) : null,
+        current_mileage: mileage === '' ? null : parseInt(mileage, 10),
+        fuel_consumption: consumption === '' ? null : num(consumption, null),
+        service_interval: interval ? parseInt(interval, 10) : 10000
+      }).eq('id', id).eq('user_id', userId);
 
-    btn.textContent = 'Сохранить изменения';
-    btn.disabled = false;
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
 
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
       document.getElementById('edit-vehicle-modal').remove();
       showToast('Авто обновлено!');
-      loadVehicles(); // Обновляем список в гараже
-      loadHome(); // Обновляем инфу на главной
+      await loadVehicles();
+      loadHome();
+      loadMaint();
+      loadExpenses();
+      loadRefuels();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('updateVehicle');
+      if (document.getElementById('update-vehicle-btn')) {
+        btn.textContent = 'Сохранить изменения';
+        btn.disabled = false;
+      }
     }
   }
-  
+
   async function saveVehicle() {
     const brand = document.getElementById('v-brand').value.trim();
     const model = document.getElementById('v-model').value.trim();
@@ -510,88 +718,139 @@ async function openEditVehicle(id) {
       showToast('Заполни хотя бы марку и модель');
       return;
     }
-
-    const btn = document.getElementById('save-vehicle-btn');
-    btn.textContent = 'Сохраняем...';
-    btn.disabled = true;
-
-    const { data: { user } } = await db.auth.getUser();
-    
-    if (!user) {
-      showToast('Ошибка: ты не авторизован');
+    if (mileage !== '' && (!Number.isFinite(Number(mileage)) || Number(mileage) < 0)) {
+      showToast('Пробег должен быть положительным числом');
       return;
     }
 
-    const { error } = await db.from('vehicles').insert({
-      user_id: user.id,
-      brand: brand,
-      model: model,
-      year: year ? parseInt(year) : null,
-      current_mileage: mileage ? parseInt(mileage) : 0,
-      fuel_consumption: document.getElementById('v-consumption').value ? parseFloat(document.getElementById('v-consumption').value) : null,
-      service_interval: document.getElementById('v-interval').value ? parseInt(document.getElementById('v-interval').value) : 10000
-    });
+    const btn = document.getElementById('save-vehicle-btn');
 
-    btn.textContent = 'Сохранить в облако';
-    btn.disabled = false;
+    // Надёжность: блокировка до первого await (двойной клик не создаст два авто)
+    if (!acquireSave('vehicle')) return;
 
-    if (error) {
-      showToast('Ошибка при сохранении: ' + error.message);
-    } else {
+    // C7: сначала проверяем пользователя, только потом блокируем кнопку
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('vehicle');
+      return;
+    }
+
+    btn.textContent = 'Сохраняем...';
+    btn.disabled = true;
+
+    try {
+      const { error } = await db.from('vehicles').insert({
+        user_id: userId,
+        brand: brand,
+        model: model,
+        year: year ? parseInt(year, 10) : null,
+        current_mileage: mileage === '' ? null : parseInt(mileage, 10),
+        fuel_consumption: document.getElementById('v-consumption').value ? num(document.getElementById('v-consumption').value, null) : null,
+        service_interval: document.getElementById('v-interval').value ? parseInt(document.getElementById('v-interval').value, 10) : 10000
+      });
+
+      if (error) {
+        showToast('Ошибка при сохранении: ' + error.message);
+        return;
+      }
+
       document.getElementById('add-vehicle-modal').remove();
       showToast('Автомобиль добавлен!');
-      loadVehicles();
+      await loadVehicles();
       loadHome();
+      loadMaint();
+      loadExpenses();
+      loadRefuels();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('vehicle');
+      if (document.getElementById('save-vehicle-btn')) {
+        btn.textContent = 'Сохранить в облако';
+        btn.disabled = false;
+      }
     }
   }
 
   async function loadVehicles() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
+    const list = document.getElementById('vehicles-list');
+    const empty = document.getElementById('vehicles-empty');
 
     const { data: vehicles, error } = await db
       .from('vehicles')
       .select('*')
       .order('created_at', { ascending: true });
 
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    const list = document.getElementById('vehicles-list');
-    const empty = document.getElementById('vehicles-empty');
-
-    if (!vehicles || vehicles.length === 0) {
-      empty.style.display = 'block';
-      return;
-    }
-
-    empty.style.display = 'none';
-    
+    // L1/C5: очищаем список ВСЕГДА, до любых проверок
     Array.from(list.children).forEach(child => {
       if (child.id !== 'vehicles-empty') child.remove();
     });
 
-    vehicles.forEach(v => {
+    if (error) {
+      console.error(error);
+      empty.innerHTML = 'Не удалось загрузить гараж.<br>Проверь соединение и обнови страницу.';
+      empty.style.display = 'block';
+      return;
+    }
+
+    const items = vehicles || [];
+
+    if (items.length === 0) {
+      activeVehicleId = null;
+      localStorage.removeItem('my_garage_active_vehicle');
+      renderVehicleSelect([]);
+      empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы внести машину.';
+      empty.style.display = 'block';
+      return;
+    }
+
+    // C1: если активной машины нет или она удалена — берём первую
+    if (!activeVehicleId || !items.some(v => v.id === activeVehicleId)) {
+      activeVehicleId = items[0].id;
+      localStorage.setItem('my_garage_active_vehicle', activeVehicleId);
+    }
+
+    empty.style.display = 'none';
+    renderVehicleSelect(items);
+
+    items.forEach(v => {
       const card = document.createElement('div');
       card.className = 'card';
+      const isActive = v.id === activeVehicleId;
       card.innerHTML = `
-        <div class="card-label">${v.year || 'Год не указан'}</div>
-        <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${v.brand} ${v.model}</div>
-        <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${v.current_mileage || 0} км</div>
-        <button class="btn" onclick="openEditVehicle('${v.id}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px;">Редактировать</button>
+        <div class="card-label">${esc(v.year || 'Год не указан')}${isActive ? ' • активный' : ''}</div>
+        <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${esc(v.brand || '')} ${esc(v.model || '')}</div>
+        <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
+        <button class="btn" onclick="openEditVehicle('${esc(v.id)}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px;">Редактировать</button>
       `;
       list.appendChild(card);
     });
   }
-async function openUpdateMileage() {
-    // Получаем текущую машину
-    const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
-    if (!vehicles || vehicles.length === 0) return;
-    const v = vehicles[0];
 
-    // Создаем всплывающее окно
+  async function openUpdateMileage() {
+    if (mileageModalOpening || document.getElementById('update-mileage-modal')) return; // M5
+    mileageModalOpening = true;
+
+    if (!activeVehicleId) {
+      mileageModalOpening = false;
+      showToast('Сначала добавь автомобиль в гараже');
+      return;
+    }
+
+    let v = null;
+    try {
+      const { data, error } = await db.from('vehicles').select('*').eq('id', activeVehicleId).maybeSingle();
+      if (error) console.error(error);
+      v = data;
+    } catch (e) {
+      console.error(e);
+    }
+    if (!v) {
+      mileageModalOpening = false;
+      showToast('Автомобиль не найден');
+      return;
+    }
+
     const modal = document.createElement('div');
     modal.id = 'update-mileage-modal';
     modal.style.cssText = `
@@ -605,200 +864,271 @@ async function openUpdateMileage() {
           <div class="section-title" style="margin: 0;">Обновить пробег</div>
           <button onclick="document.getElementById('update-mileage-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
-        <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${v.current_mileage || 0} км</p>
-        
-        <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${v.current_mileage || ''}">
-        
-        <button class="btn" onclick="saveNewMileage('${v.id}')" id="save-mileage-btn" style="margin-top: 8px;">Сохранить</button>
+        <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${fmtNum(v.current_mileage || 0)} км</p>
+
+        <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${v.current_mileage === null || v.current_mileage === undefined ? '' : esc(v.current_mileage)}">
+
+        <button class="btn" onclick="saveNewMileage('${esc(v.id)}')" id="save-mileage-btn" style="margin-top: 8px;">Сохранить</button>
       </div>
     `;
     document.body.appendChild(modal);
-    
-    // Сразу ставим курсор в поле ввода
-    setTimeout(() => document.getElementById('new-mileage').focus(), 100);
+    mileageModalOpening = false;
+
+    setTimeout(() => {
+      const el = document.getElementById('new-mileage');
+      if (el) el.focus();
+    }, 100);
   }
 
   async function saveNewMileage(id) {
-    const newMileage = document.getElementById('new-mileage').value;
-    if (!newMileage) {
+    const raw = document.getElementById('new-mileage').value;
+
+    if (raw === '' || raw === null) {
       showToast('Введи пробег');
       return;
     }
+    const newMileage = parseInt(raw, 10);
+    if (!Number.isFinite(newMileage) || newMileage < 0) {
+      showToast('Пробег должен быть положительным числом');
+      return;
+    }
+
+    // C6: не позволяем тихо откатить одометр назад
+    const { data: vData, error: vErr } = await db.from('vehicles').select('current_mileage').eq('id', id).maybeSingle();
+    if (vErr) console.error(vErr);
+    const current = vData && vData.current_mileage ? Number(vData.current_mileage) : 0;
+    if (current > 0 && newMileage < current) {
+      if (!confirm(`Текущий пробег ${current} км. Новое значение меньше.\nПоставить ${newMileage} км?`)) return;
+    }
 
     const btn = document.getElementById('save-mileage-btn');
+    if (!acquireSave('mileage')) return;
+
+    // C8: изменяем только свою запись
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('mileage');
+      return;
+    }
+
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
 
-    const { error } = await db.from('vehicles').update({
-      current_mileage: parseInt(newMileage)
-    }).eq('id', id);
+    try {
+      const { error } = await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', id).eq('user_id', userId);
 
-    btn.textContent = 'Сохранить';
-    btn.disabled = false;
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
 
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
       document.getElementById('update-mileage-modal').remove();
       showToast('Пробег обновлен!');
-      loadHome();     // Обновляем главную (пробег и напоминания)
-      loadVehicles(); // Обновляем гараж
-    }
-  }
-  // ==========================================
-  // ЛОГИКА ГЛАВНОЙ
-  // ==========================================
-      async function loadHome() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-
-    const { data: vehicles } = await db.from('vehicles').select('*').limit(1);
-    
-    if (vehicles && vehicles.length > 0) {
-      const v = vehicles[0];
-      document.getElementById('home-car-name').textContent = `${v.brand} ${v.model}`;
-      document.getElementById('home-car-mileage').textContent = `Пробег: ${v.current_mileage || 0} км`;
-    } else {
-      document.getElementById('home-car-name').textContent = 'Ещё не добавлен';
-      document.getElementById('home-car-name').style.fontSize = '16px';
-      document.getElementById('home-car-mileage').textContent = 'Перейди в «Гараж» → «Добавить авто»';
-    }
-
-    // Расход по БК
-    if (vehicles && vehicles.length > 0 && vehicles[0].fuel_consumption) {
-      document.getElementById('home-consumption').textContent = vehicles[0].fuel_consumption + ' л/100 км';
-      document.getElementById('home-consumption').style.fontSize = '28px';
-    } else {
-      document.getElementById('home-consumption').textContent = 'не указан';
-      document.getElementById('home-consumption').style.fontSize = '16px';
-    }
-
-    // Считаем расходы
-    const { data: maint } = await db.from('maintenance').select('*');
-    const { data: exp } = await db.from('expenses').select('*');
-    
-    let total = 0;
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
-
-    if (maint) {
-      maint.forEach(m => {
-        if (!m.date) return;
-        const d = new Date(m.date);
-        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-          total += Number(m.cost || 0);
-        }
-      });
-    }
-    
-    if (exp) {
-      exp.forEach(e => {
-        if (!e.date) return;
-        const d = new Date(e.date);
-        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-          total += Number(e.amount || 0);
-        }
-      });
-    }
-
-    const expElement = document.getElementById('home-expenses');
-    if (expElement) {
-      expElement.textContent = `${total.toLocaleString('ru-RU')} ₽`;
-    }
-
-    // === ЛОГИКА НАПОМИНАНИЙ О ТО (по видам работ) ===
-const reminderBox = document.getElementById('reminder-box');
-try {
-  const { data: vehiclesData } = await db.from('vehicles').select('*').limit(1);
-  if (!vehiclesData || vehiclesData.length === 0) {
-    if (reminderBox) reminderBox.style.display = 'none';
-    return; // выходим из функции, если авто нет
-  }
-
-  const v = vehiclesData[0];
-  const currentMileage = v.current_mileage || 0;
-
-  // Загружаем все виды работ пользователя
-  const { data: types } = await db.from('service_types').select('*');
-  
-  if (!types || types.length === 0) {
-    // Видов работ нет — нечего напоминать
-    if (reminderBox) reminderBox.style.display = 'none';
-  } else {
-    // Для каждого вида работ ищем последнюю запись ТО
-    let mostCritical = null; // самая критичная позиция
-
-    for (const type of types) {
-      const { data: lastRecords } = await db
-        .from('maintenance')
-        .select('*')
-        .eq('service_type_id', type.id)
-        .order('mileage', { ascending: false })
-        .limit(1);
-
-      // Если по этому виду ещё не было ТО — считаем от 0 (или от пробега покупки)
-      const lastMileage = (lastRecords && lastRecords.length > 0) ? lastRecords[0].mileage : 0;
-      const kmPassed = currentMileage - lastMileage;
-      const kmLeft = type.interval_km - kmPassed;
-
-      // Сохраняем самую критичную позицию (минимальный остаток)
-      if (!mostCritical || kmLeft < mostCritical.kmLeft) {
-        mostCritical = {
-          name: type.name,
-          interval: type.interval_km,
-          lastMileage: lastMileage,
-          kmPassed: kmPassed,
-          kmLeft: kmLeft
-        };
+      await loadVehicles();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('mileage');
+      if (document.getElementById('save-mileage-btn')) {
+        btn.textContent = 'Сохранить';
+        btn.disabled = false;
       }
     }
+  }
 
-    // Показываем напоминание по самой критичной позиции
-    if (mostCritical) {
-      if (mostCritical.kmLeft <= 0) {
+  // ==========================================
+  // ГЛАВНАЯ
+  // ==========================================
+  async function loadHome() {
+    const nameEl = document.getElementById('home-car-name');
+    const mileageEl = document.getElementById('home-car-mileage');
+    const consEl = document.getElementById('home-consumption');
+    const expEl = document.getElementById('home-expenses');
+    const reminderBox = document.getElementById('reminder-box');
+
+    nameEl.style.fontSize = '20px'; // L1: сбрасываем размер из «пустого» состояния
+
+    if (!activeVehicleId) {
+      nameEl.textContent = 'Ещё не добавлен';
+      nameEl.style.fontSize = '16px';
+      mileageEl.textContent = 'Перейди в «Гараж» → «Добавить авто»';
+      consEl.textContent = 'не указан';
+      consEl.style.fontSize = '16px';
+      expEl.textContent = '0 ₽';
+      if (reminderBox) reminderBox.style.display = 'none';
+      return;
+    }
+
+    const { data: v, error: vErr } = await db.from('vehicles').select('*').eq('id', activeVehicleId).maybeSingle();
+    if (vErr) {
+      // Не показываем «нет автомобиля» при ошибке сети — это разные ситуации
+      console.error(vErr);
+      nameEl.textContent = 'Не удалось загрузить';
+      nameEl.style.fontSize = '16px';
+      mileageEl.textContent = 'Проверь соединение и обнови страницу';
+      consEl.textContent = '—';
+      consEl.style.fontSize = '16px';
+      expEl.textContent = '— ₽';
+      if (reminderBox) reminderBox.style.display = 'none';
+      return;
+    }
+
+    if (!v) {
+      nameEl.textContent = 'Ещё не добавлен';
+      nameEl.style.fontSize = '16px';
+      mileageEl.textContent = 'Перейди в «Гараж» → «Добавить авто»';
+      consEl.textContent = 'не указан';
+      consEl.style.fontSize = '16px';
+      expEl.textContent = '0 ₽';
+      if (reminderBox) reminderBox.style.display = 'none';
+      return;
+    }
+
+    nameEl.textContent = `${v.brand || ''} ${v.model || ''}`.trim() || 'Автомобиль';
+    mileageEl.textContent = `Пробег: ${fmtNum(v.current_mileage || 0)} км`;
+
+    const consumption = v.fuel_consumption === null || v.fuel_consumption === undefined || v.fuel_consumption === ''
+      ? null
+      : num(v.fuel_consumption, null);
+    if (consumption !== null) {
+      consEl.textContent = consumption.toFixed(1) + ' л/100 км';
+      consEl.style.fontSize = '28px';
+    } else {
+      consEl.textContent = 'не указан';
+      consEl.style.fontSize = '16px';
+    }
+
+    // C2: расходы считаем ТОЛЬКО по активному автомобилю
+    const [maintRes, expRes] = await Promise.all([
+      db.from('maintenance').select('*').eq('vehicle_id', activeVehicleId),
+      db.from('expenses').select('*').eq('vehicle_id', activeVehicleId)
+    ]);
+
+    if (maintRes.error) console.error(maintRes.error);
+    if (expRes.error) console.error(expRes.error);
+
+    // Не показываем «0 ₽» при ошибке загрузки — это ложный ноль
+    if (maintRes.error || expRes.error) {
+      if (expEl) expEl.textContent = '— ₽';
+    } else {
+      let total = 0;
+      (maintRes.data || []).forEach(m => {
+        if (inCurrentMonth(m.date)) total += num(m.cost, 0);
+      });
+      (expRes.data || []).forEach(e => {
+        if (inCurrentMonth(e.date)) total += num(e.amount, 0);
+      });
+
+      if (expEl) expEl.textContent = fmtMoney(total);
+    }
+
+    // C3: напоминания о ТО — только по активному авто, только по видам работ,
+    // у которых уже есть хотя бы одна запись
+    try {
+      const [typesRes, recordsRes] = await Promise.all([
+        db.from('service_types').select('*'),
+        db.from('maintenance')
+          .select('*')
+          .eq('vehicle_id', activeVehicleId)
+          .not('service_type_id', 'is', null)
+          .order('mileage', { ascending: false })
+      ]);
+
+      if (typesRes.error) console.error(typesRes.error);
+      if (recordsRes.error) console.error(recordsRes.error);
+
+      const types = typesRes.data || [];
+      const records = recordsRes.data || [];
+
+      // первая запись в массиве = самая свежая (сортировка по mileage DESC)
+      const lastByType = new Map();
+      records.forEach(r => {
+        if (r.service_type_id && !lastByType.has(r.service_type_id)) {
+          lastByType.set(r.service_type_id, r);
+        }
+      });
+
+      const currentMileage = num(v.current_mileage, 0);
+      const due = [];
+      const soon = [];
+
+      types.forEach(t => {
+        const last = lastByType.get(t.id);
+        if (!last) return; // записи нет — напоминание не показываем
+
+        const interval = num(t.interval_km, 0);
+        if (interval <= 0) return; // защита от деления/NaN
+
+        const lastMileage = num(last.mileage, 0);
+        const kmPassed = currentMileage - lastMileage;
+        const kmLeft = interval - kmPassed;
+
+        if (kmLeft <= 0) {
+          due.push({ name: t.name, kmLeft: kmLeft });
+        } else if (kmLeft <= 1000) {
+          soon.push({ name: t.name, kmLeft: kmLeft });
+        }
+      });
+
+      if (!reminderBox) {
+        // ничего
+      } else if (due.length > 0) {
         reminderBox.style.display = 'block';
         reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
         reminderBox.style.borderColor = 'var(--danger)';
-        document.getElementById('reminder-title').style.color = 'var(--danger)';
-        document.getElementById('reminder-title').textContent = '⚠️ Пора на ТО!';
-        document.getElementById('reminder-text').textContent =
-          `${mostCritical.name}: проехали ${mostCritical.kmPassed.toLocaleString('ru-RU')} км из ${mostCritical.interval.toLocaleString('ru-RU')} км. Пора менять!`;
-      } else if (mostCritical.kmLeft <= 1000) {
+        const title = document.getElementById('reminder-title');
+        const text = document.getElementById('reminder-text');
+        title.style.color = 'var(--danger)';
+        title.textContent = '⚠️ Пора на ТО!';
+        text.textContent = 'Пора выполнить: ' + due.map(d =>
+          d.kmLeft < 0 ? `${d.name} (перепробег ${fmtNum(Math.abs(d.kmLeft))} км)` : d.name
+        ).join(', ') + '.';
+      } else if (soon.length > 0) {
         reminderBox.style.display = 'block';
         reminderBox.style.background = 'rgba(255, 193, 7, 0.1)';
         reminderBox.style.borderColor = '#FFC107';
-        document.getElementById('reminder-title').style.color = '#FFC107';
-        document.getElementById('reminder-title').textContent = '🔔 Скоро ТО';
-        document.getElementById('reminder-text').textContent =
-          `${mostCritical.name}: до следующей замены осталось ${mostCritical.kmLeft.toLocaleString('ru-RU')} км.`;
+        const title = document.getElementById('reminder-title');
+        const text = document.getElementById('reminder-text');
+        title.style.color = '#FFC107';
+        title.textContent = '🔔 Скоро ТО';
+        text.textContent = 'Скоро: ' + soon.map(s => `${s.name} (осталось ${fmtNum(s.kmLeft)} км)`).join(', ') + '.';
       } else {
         reminderBox.style.display = 'none';
       }
+    } catch (e) {
+      console.log('Ошибка в напоминаниях:', e);
+      if (reminderBox) reminderBox.style.display = 'none';
     }
   }
-} catch (e) {
-  console.log('Ошибка в напоминаниях:', e);
-}
-  } // <--- ЗДЕСЬ КОНЕЦ ФУНКЦИИ
-  
-  // ==========================================
-  // ЛОГИКА ОБСЛУЖИВАНИЯ
-  // ==========================================
-  let currentVehicleId = null;
 
+  // ==========================================
+  // ОБСЛУЖИВАНИЕ
+  // ==========================================
   async function openAddMaint() {
-    const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
-    if (!vehicles || vehicles.length === 0) {
+    if (maintModalOpening || document.getElementById('add-maint-modal')) return; // M5
+    maintModalOpening = true;
+
+    if (!activeVehicleId) {
+      maintModalOpening = false;
       showToast('Сначала добавь автомобиль в гараже');
       return;
     }
-    currentVehicleId = vehicles[0].id;
 
-    // Загружаем список видов работ из базы
-    const { data: types } = await db.from('service_types').select('*').order('name');
-    const options = (types || []).map(t => 
-      `<option value="${t.id}">${t.name} (${t.interval_km} км)</option>`
+    // Запоминаем авто на момент открытия формы
+    const formVehicleId = activeVehicleId;
+
+    let types = null;
+    try {
+      const { data, error } = await db.from('service_types').select('*').order('name');
+      if (error) console.error(error);
+      types = data;
+    } catch (e) {
+      console.error(e);
+    }
+
+    const options = (types || []).map(t =>
+      `<option value="${esc(t.id)}">${esc(t.name)} (${esc(t.interval_km)} км)</option>`
     ).join('');
 
     const modal = document.createElement('div');
@@ -814,10 +1144,10 @@ try {
           <div class="section-title" style="margin: 0;">Новая запись</div>
           <button onclick="document.getElementById('add-maint-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
-        
+
         <input type="text" id="m-title" class="input" placeholder="Что сделали? (например, Замена масла)">
-        
-        <select id="m-type" class="input" style="appearance: none; -webkit-appearance: none; margin-bottom: 12px;">
+
+        <select id="m-type" class="input" style="margin-bottom: 12px;">
           <option value="">— Вид работ (необязательно) —</option>
           ${options}
         </select>
@@ -826,13 +1156,15 @@ try {
         <input type="number" id="m-mileage" class="input" placeholder="Пробег (км)">
         <input type="number" id="m-cost" class="input" placeholder="Стоимость (₽)">
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
-        
+
         <button class="btn" onclick="saveMaint()" id="save-maint-btn" style="margin-top: 8px;">Сохранить</button>
         <button class="btn" onclick="openAddServiceType()" style="margin-top: 8px; background: transparent; color: var(--text); border: 1px solid var(--border);">+ Создать вид работ (например, Замена масла)</button>
       </div>
     `;
     document.body.appendChild(modal);
-}
+    maintFormVehicleId = formVehicleId;
+    maintModalOpening = false;
+  }
 
   async function saveMaint() {
     const title = document.getElementById('m-title').value.trim();
@@ -842,8 +1174,40 @@ try {
     const comment = document.getElementById('m-comment').value.trim();
     const typeId = document.getElementById('m-type').value || null;
 
-    if (!title || !date || !mileage) {
+    if (!title || !date || mileage === '') {
       showToast('Заполни название, дату и пробег');
+      return;
+    }
+    const mileageNum = parseInt(mileage, 10);
+    if (!Number.isFinite(mileageNum) || mileageNum < 0) {
+      showToast('Пробег должен быть положительным числом');
+      return;
+    }
+
+    // L5: запятая как десятичный разделитель (4500,50) не должна обрезать сумму
+    let costNum = null;
+    if (cost !== '') {
+      costNum = num(cost, NaN);
+      if (!Number.isFinite(costNum) || costNum < 0) {
+        showToast('Стоимость должна быть числом');
+        return;
+      }
+    }
+
+    // C1: привязка к активному автомобилю, без limit(1).
+    // Автомобиль фиксируется в момент открытия формы, чтобы переключение
+    // авто в соседней вкладке не отправило запись «чужой» машине.
+    const targetVehicleId = maintFormVehicleId || activeVehicleId;
+    if (!targetVehicleId) {
+      showToast('Сначала добавь автомобиль в гараже');
+      return;
+    }
+
+    if (!acquireSave('maint')) return;
+
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('maint');
       return;
     }
 
@@ -851,41 +1215,55 @@ try {
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
 
-    const { error } = await db.from('maintenance').insert({
-      user_id: (await db.auth.getUser()).data.user.id,
-      vehicle_id: currentVehicleId,
-      title: title,
-      date: date,
-      mileage: parseInt(mileage),
-      cost: cost ? parseFloat(cost) : 0,
-      comment: comment,
-      service_type_id: typeId
-    });
+    try {
+      const { error } = await db.from('maintenance').insert({
+        user_id: userId,
+        vehicle_id: targetVehicleId,
+        title: title,
+        date: date,
+        mileage: mileageNum,
+        cost: costNum,
+        comment: comment,
+        service_type_id: typeId
+      });
 
-    btn.textContent = 'Сохранить';
-    btn.disabled = false;
-
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
-      // --- НАЧАЛО НОВОГО КОДА ---
-      // Проверяем, не нужно ли обновить пробег у машины
-      const newMileage = parseInt(mileage);
-      const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', currentVehicleId).single();
-      
-      if (vData && newMileage > (vData.current_mileage || 0)) {
-        await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', currentVehicleId);
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
       }
-      // --- КОНЕЦ НОВОГО КОДА ---
+
+      // Подтягиваем пробег авто, если в записи он больше.
+      // Ошибка синхронизации пробега НЕ должна выглядеть как ошибка сохранения записи:
+      // запись уже в базе, повторное нажатие «Сохранить» создало бы дубль.
+      try {
+        const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', targetVehicleId).maybeSingle();
+        const current = vData && vData.current_mileage ? Number(vData.current_mileage) : 0;
+        if (mileageNum > current) {
+          await db.from('vehicles').update({ current_mileage: mileageNum }).eq('id', targetVehicleId).eq('user_id', userId);
+        }
+      } catch (e) {
+        console.error('Не удалось обновить пробег:', e);
+      }
 
       document.getElementById('add-maint-modal').remove();
       showToast('Запись добавлена!');
       loadMaint();
-      loadHome(); // Главная обновится и покажет новый пробег
+      await loadVehicles();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('maint');
+      if (document.getElementById('save-maint-btn')) {
+        btn.textContent = 'Сохранить';
+        btn.disabled = false;
+      }
     }
-  } // <--- ЗДЕСЬ БЫЛА ПОТЕРЯНА СКОБКА, ТЕПЕРЬ ОНА НА МЕСТЕ
+  }
 
-function openAddServiceType() {
+  function openAddServiceType() {
+    if (document.getElementById('add-st-modal')) return; // M5
+
     const m = document.createElement('div');
     m.id = 'add-st-modal';
     m.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(14,15,17,.9); z-index:1001; display:flex; flex-direction:column; justify-content:flex-end;';
@@ -905,59 +1283,92 @@ function openAddServiceType() {
 
   async function saveServiceType() {
     const name = document.getElementById('st-name').value.trim();
-    const interval = parseInt(document.getElementById('st-interval').value);
-    
-    if (!name || !interval) { 
-      showToast('Заполни название и интервал'); 
-      return; 
+    const interval = parseInt(document.getElementById('st-interval').value, 10);
+
+    if (!name || !Number.isFinite(interval) || interval <= 0) {
+      showToast('Заполни название и интервал');
+      return;
     }
-    
+
+    if (!acquireSave('serviceType')) return;
+
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('serviceType');
+      return;
+    }
+
     const btn = document.getElementById('save-st-btn');
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
 
-    const { error } = await db.from('service_types').insert({
-      user_id: (await db.auth.getUser()).data.user.id,
-      name: name, 
-      interval_km: interval
-    });
-    
-    if (error) { 
-      showToast('Ошибка: ' + error.message); 
-      btn.textContent = 'Сохранить вид работ';
-      btn.disabled = false;
-      return; 
+    try {
+      const { data, error } = await db.from('service_types').insert({
+        user_id: userId,
+        name: name,
+        interval_km: interval
+      }).select('id').single();
+
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
+
+      // M6: не пересоздаём форму ТО — просто добавляем новый пункт в список
+      const sel = document.getElementById('m-type');
+      if (sel && data && data.id) {
+        const opt = document.createElement('option');
+        opt.value = data.id;
+        opt.textContent = `${name} (${interval} км)`;
+        sel.appendChild(opt);
+        sel.value = data.id;
+      }
+
+      const stModal = document.getElementById('add-st-modal');
+      if (stModal) stModal.remove();
+
+      showToast('Вид работ добавлен!');
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('serviceType');
+      if (document.getElementById('save-st-btn')) {
+        btn.textContent = 'Сохранить вид работ';
+        btn.disabled = false;
+      }
     }
-    
-    // Закрываем окно создания вида работ и окно создания ТО
-    document.getElementById('add-st-modal').remove();
-    document.getElementById('add-maint-modal').remove();
-    
-    showToast('Вид работ добавлен!');
-    
-    // Переоткрываем окно ТО, чтобы новый вид работ появился в списке
-    openAddMaint(); 
   }
 
   async function loadMaint() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-
-    const { data: records, error } = await db
-      .from('maintenance')
-      .select('*')
-      .order('date', { ascending: false });
-
-    if (error) return;
-
     const list = document.getElementById('maint-list');
     const empty = document.getElementById('maint-empty');
-    
+
     Array.from(list.children).forEach(child => {
       if (child.id !== 'maint-empty') child.remove();
     });
 
+    if (!activeVehicleId) {
+      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.style.display = 'block';
+      return;
+    }
+
+    // C2: только записи активного автомобиля
+    const { data: records, error } = await db
+      .from('maintenance')
+      .select('*')
+      .eq('vehicle_id', activeVehicleId)
+      .order('date', { ascending: false });
+
+    if (error) {
+      console.error(error);
+      empty.innerHTML = 'Не удалось загрузить обслуживание.<br>Проверь соединение.';
+      empty.style.display = 'block';
+      return;
+    }
+
     if (!records || records.length === 0) {
+      empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы записать ремонт.';
       empty.style.display = 'block';
       return;
     }
@@ -968,260 +1379,284 @@ function openAddServiceType() {
       const card = document.createElement('div');
       card.id = 'maint-card-' + r.id;
       card.className = 'card';
-      card.style.position = 'relative'; // <--- ДОБАВИЛИ
+      card.style.position = 'relative';
       card.innerHTML = `
-        <button onclick="deleteMaint('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-        <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')} • ${r.mileage} км</div>
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${r.title}</div>
-        <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.cost} ₽</div>
-        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${r.comment}</div>` : ''}
+        <button onclick="deleteMaint('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)} • ${fmtNum(r.mileage)} км</div>
+        <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${esc(r.title)}</div>
+        <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.cost === null || r.cost === undefined ? '—' : fmtNum(r.cost)} ₽</div>
+        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
   }
 
-// ==========================================
-// ЛОГИКА ЗАПРАВОК (упрощённая)
-// ==========================================
-async function openAddRefuel() {
-  const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
-  if (!vehicles || vehicles.length === 0) {
-    showToast('Сначала добавь автомобиль');
-    return;
-  }
-
-  const modal = document.createElement('div');
-  modal.id = 'add-refuel-modal';
-  modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
-  modal.innerHTML = `
-    <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-        <div class="section-title" style="margin: 0;">Новая заправка</div>
-        <button onclick="document.getElementById('add-refuel-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
-      </div>
-
-      <input type="date" id="r-date" class="input">
-      <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
-      <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
-      <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
-
-      <button type="button" onclick="document.getElementById('r-extra').style.display='block'; this.style.display='none';"
-        style="background: none; border: none; color: var(--text-dim); font-size: 14px; padding: 8px 0 16px; cursor: pointer; font-family: inherit;">
-        + Дополнительно (пробег, полный бак)
-      </button>
-
-      <div id="r-extra" style="display: none;">
-        <input type="number" id="r-mileage" class="input" placeholder="Пробег (км, необязательно)">
-        <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
-          <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
-          <span style="font-size: 15px;">Полный бак</span>
-        </label>
-      </div>
-
-      <button class="btn" onclick="saveRefuel()" id="save-refuel-btn" style="margin-top: 8px;">Сохранить</button>
-    </div>
-  `;
-  document.body.appendChild(modal);
-}
-
-async function saveRefuel() {
-  const date = document.getElementById('r-date').value;
-  const liters = document.getElementById('r-liters').value;
-  const total = document.getElementById('r-total').value;
-  const comment = document.getElementById('r-comment').value.trim();
-  const mileageEl = document.getElementById('r-mileage');
-  const mileage = mileageEl ? mileageEl.value : '';
-  const fullEl = document.getElementById('r-full');
-  const isFull = fullEl ? fullEl.checked : false;
-
-  if (!date || !liters || !total) {
-    showToast('Заполни дату, литры и сумму');
-    return;
-  }
-
-  const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
-  if (!vehicles || vehicles.length === 0) {
-    showToast('Сначала добавь автомобиль');
-    return;
-  }
-  const vehicleId = vehicles[0].id;
-
-  const btn = document.getElementById('save-refuel-btn');
-  btn.textContent = 'Сохраняем...';
-  btn.disabled = true;
-
-  const { error } = await db.from('refuels').insert({
-    user_id: (await db.auth.getUser()).data.user.id,
-    vehicle_id: vehicleId,
-    date: date,
-    liters: parseFloat(liters),
-    total_cost: parseFloat(total),
-    mileage: mileage ? parseInt(mileage) : null,
-    is_full_tank: isFull,
-    comment: comment
-  });
-
-  btn.textContent = 'Сохранить';
-  btn.disabled = false;
-
-  if (error) {
-    showToast('Ошибка: ' + error.message);
-    return;
-  }
-
-  if (mileage) {
-    const newMileage = parseInt(mileage);
-    const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', vehicleId).single();
-    if (vData && newMileage > (vData.current_mileage || 0)) {
-      await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', vehicleId);
-    }
-  }
-
-  document.getElementById('add-refuel-modal').remove();
-  showToast('Заправка добавлена!');
-  loadRefuels();
-  loadHome();
-}
-
-async function loadRefuels() {
-  const { data: { user } } = await db.auth.getUser();
-  if (!user) return;
-
-  const { data: records, error } = await db
-    .from('refuels')
-    .select('*')
-    .order('date', { ascending: false });
-
-  if (error) return;
-
-  const list = document.getElementById('refuels-list');
-  const empty = document.getElementById('refuels-empty');
-  
-  Array.from(list.children).forEach(child => {
-    if (child.id !== 'refuels-empty') child.remove();
-  });
-
-  if (!records || records.length === 0) {
-    empty.style.display = 'block';
-    document.getElementById('refuel-month-total').textContent = '0 ₽';
-    return;
-  }
-
-  empty.style.display = 'none';
-  
-  const now = new Date();
-  const monthTotal = records
-    .filter(r => {
-      const d = new Date(r.date);
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    })
-    .reduce((sum, r) => sum + Number(r.total_cost || 0), 0);
-  document.getElementById('refuel-month-total').textContent =
-    monthTotal.toLocaleString('ru-RU') + ' ₽';
-
-  records.forEach(r => {
-    const card = document.createElement('div');
-    card.id = 'refuel-card-' + r.id;
-    card.className = 'card';
-    card.style.position = 'relative';
-    const mileageStr = r.mileage ? ' • ' + r.mileage + ' км' : '';
-    card.innerHTML = `
-      <button onclick="deleteRefuel('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-      <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')}${mileageStr}</div>
-      <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${r.liters} л</div>
-      <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${Number(r.total_cost).toLocaleString('ru-RU')} ₽</div>
-      ${r.comment ? '<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">' + r.comment + '</div>' : ''}
-    `;
-    list.appendChild(card);
-  });
-}
-
-async function deleteRefuel(id) {
-    if (!confirm('Удалить эту заправку?')) return;
-    
-    const { error } = await db.from('refuels').delete().eq('id', id);
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
-      showToast('Заправка удалена');
-      loadRefuels(); // Перерисовываем список и сумму за месяц
-      loadHome();    // Обновляем главную
-    }
-  }
-// ==========================================
-  // ==========================================
-  // ИНИЦИАЛИЗАЦИЯ ПРИЛОЖЕНИЯ
-  // ==========================================
-  async function init() {
-    const { data: { session } } = await db.auth.getSession();
-    
-    if (session) {
-      document.getElementById('screen-auth').classList.remove('active');
-      document.getElementById('screen-app').classList.add('active');
-      
-      // Загружаем все данные разом
-      loadHome();
-      loadVehicles();
-      loadMaint();
-      loadExpenses();
-      loadRefuels();
-    } else {
-      document.getElementById('screen-auth').classList.add('active');
-      document.getElementById('screen-app').classList.remove('active');
-    }
-  }
-
-  // Слушаем изменения входа (например, после клика по ссылке из письма)
-  db.auth.onAuthStateChange((event, session) => {
-    if (session) {
-      document.getElementById('screen-auth').classList.remove('active');
-      document.getElementById('screen-app').classList.add('active');
-      
-      // Когда пользователь только что вошел, тоже грузим данные
-      loadHome();
-      loadVehicles();
-      loadMaint();
-      loadExpenses();
-      loadRefuels();
-    }
-  });
-
-  // Запускаем приложение
-
-  // === УДАЛЕНИЕ ОБСЛУЖИВАНИЯ ===
   async function deleteMaint(id) {
     if (!confirm('Удалить эту запись?')) return;
-    
-    const { error } = await db.from('maintenance').delete().eq('id', id);
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
+
+    // C8: удаляем только свою запись (дополнительный барьер к RLS)
+    const userId = await getUserId();
+    if (!userId) return;
+
+    try {
+      const { error } = await db.from('maintenance').delete().eq('id', id).eq('user_id', userId);
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
       showToast('Запись удалена');
-      loadMaint(); // Перерисовываем список
-      loadHome();  // Обновляем главную
+      loadMaint();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
     }
   }
 
-  // === ЛОГИКА РАСХОДОВ ===
-  async function openAddExpense() {
-    const { data: vehicles } = await db.from('vehicles').select('id').limit(1);
-    if (!vehicles || vehicles.length === 0) {
+  // ==========================================
+  // ЗАПРАВКИ
+  // ==========================================
+  async function openAddRefuel() {
+    if (document.getElementById('add-refuel-modal')) return; // M5
+
+    if (!activeVehicleId) {
       showToast('Сначала добавь автомобиль');
       return;
     }
-    const vId = vehicles[0].id;
+
+    const modal = document.createElement('div');
+    modal.id = 'add-refuel-modal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+          <div class="section-title" style="margin: 0;">Новая заправка</div>
+          <button onclick="document.getElementById('add-refuel-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+        </div>
+
+        <input type="date" id="r-date" class="input">
+        <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
+        <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
+        <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
+
+        <button type="button" onclick="document.getElementById('r-extra').style.display='block'; this.style.display='none';"
+          style="background: none; border: none; color: var(--text-dim); font-size: 14px; padding: 8px 0 16px; cursor: pointer; font-family: inherit;">
+          + Дополнительно (пробег, полный бак)
+        </button>
+
+        <div id="r-extra" style="display: none;">
+          <input type="number" id="r-mileage" class="input" placeholder="Пробег (км, необязательно)">
+          <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
+            <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
+            <span style="font-size: 15px;">Полный бак</span>
+          </label>
+        </div>
+
+        <button class="btn" onclick="saveRefuel()" id="save-refuel-btn" style="margin-top: 8px;">Сохранить</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    refuelFormVehicleId = activeVehicleId;
+  }
+
+  async function saveRefuel() {
+    const date = document.getElementById('r-date').value;
+    const liters = document.getElementById('r-liters').value;
+    const total = document.getElementById('r-total').value;
+    const comment = document.getElementById('r-comment').value.trim();
+    const mileageEl = document.getElementById('r-mileage');
+    const mileage = mileageEl ? mileageEl.value : '';
+    const fullEl = document.getElementById('r-full');
+    const isFull = fullEl ? fullEl.checked : false;
+
+    if (!date || liters === '' || total === '') {
+      showToast('Заполни дату, литры и сумму');
+      return;
+    }
+
+    const litersNum = num(liters, NaN);
+    const totalNum = num(total, NaN);
+    if (!Number.isFinite(litersNum) || litersNum <= 0) {
+      showToast('Литры должны быть положительным числом');
+      return;
+    }
+    if (!Number.isFinite(totalNum) || totalNum < 0) {
+      showToast('Сумма должна быть числом');
+      return;
+    }
+
+    // C1: привязка к активному автомобилю
+    // C1: привязка к активному автомобилю на момент открытия формы
+    const targetVehicleId = refuelFormVehicleId || activeVehicleId;
+    if (!targetVehicleId) {
+      showToast('Сначала добавь автомобиль');
+      return;
+    }
+
+    if (!acquireSave('refuel')) return;
+
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('refuel');
+      return;
+    }
+
+    const btn = document.getElementById('save-refuel-btn');
+    btn.textContent = 'Сохраняем...';
+    btn.disabled = true;
+
+    try {
+      const { error } = await db.from('refuels').insert({
+        user_id: userId,
+        vehicle_id: targetVehicleId,
+        date: date,
+        liters: litersNum,
+        total_cost: totalNum,
+        mileage: mileage === '' ? null : parseInt(mileage, 10),
+        is_full_tank: isFull,
+        comment: comment
+      });
+
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
+
+      // Пробег подтягиваем отдельно: сбой здесь не должен выглядеть как
+      // неудачное сохранение заправки (иначе пользователь нажмёт ещё раз и создаст дубль).
+      if (mileage !== '') {
+        try {
+          const newMileage = parseInt(mileage, 10);
+          const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', targetVehicleId).maybeSingle();
+          const current = vData && vData.current_mileage ? Number(vData.current_mileage) : 0;
+          if (newMileage > current) {
+            await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', targetVehicleId).eq('user_id', userId);
+          }
+        } catch (e) {
+          console.error('Не удалось обновить пробег:', e);
+        }
+      }
+
+      document.getElementById('add-refuel-modal').remove();
+      showToast('Заправка добавлена!');
+      loadRefuels();
+      await loadVehicles();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('refuel');
+      if (document.getElementById('save-refuel-btn')) {
+        btn.textContent = 'Сохранить';
+        btn.disabled = false;
+      }
+    }
+  }
+
+  async function loadRefuels() {
+    const list = document.getElementById('refuels-list');
+    const empty = document.getElementById('refuels-empty');
+    const totalEl = document.getElementById('refuel-month-total');
+
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'refuels-empty') child.remove();
+    });
+
+    if (!activeVehicleId) {
+      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.style.display = 'block';
+      if (totalEl) totalEl.textContent = '0 ₽';
+      return;
+    }
+
+    // C2: только заправки активного автомобиля
+    const { data: records, error } = await db
+      .from('refuels')
+      .select('*')
+      .eq('vehicle_id', activeVehicleId)
+      .order('date', { ascending: false });
+
+    if (error) {
+      console.error(error);
+      empty.innerHTML = 'Не удалось загрузить заправки.<br>Проверь соединение.';
+      empty.style.display = 'block';
+      if (totalEl) totalEl.textContent = '— ₽';
+      return;
+    }
+
+    if (!records || records.length === 0) {
+      empty.innerHTML = 'Пока пусто.<br>Добавь первую заправку.';
+      empty.style.display = 'block';
+      if (totalEl) totalEl.textContent = '0 ₽';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    const monthTotal = records
+      .filter(r => inCurrentMonth(r.date))
+      .reduce((sum, r) => sum + num(r.total_cost, 0), 0);
+
+    if (totalEl) totalEl.textContent = fmtMoney(monthTotal);
+
+    records.forEach(r => {
+      const card = document.createElement('div');
+      card.id = 'refuel-card-' + r.id;
+      card.className = 'card';
+      card.style.position = 'relative';
+      const mileageStr = r.mileage ? ' • ' + fmtNum(r.mileage) + ' км' : '';
+      card.innerHTML = `
+        <button onclick="deleteRefuel('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)}${mileageStr}</div>
+        <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${fmtNum(r.liters)} л</div>
+        <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.total_cost === null || r.total_cost === undefined ? '—' : fmtNum(r.total_cost)} ₽</div>
+        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
+      `;
+      list.appendChild(card);
+    });
+  }
+
+  async function deleteRefuel(id) {
+    if (!confirm('Удалить эту заправку?')) return;
+
+    const userId = await getUserId();
+    if (!userId) return;
+
+    try {
+      const { error } = await db.from('refuels').delete().eq('id', id).eq('user_id', userId);
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
+      showToast('Заправка удалена');
+      loadRefuels();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    }
+  }
+
+  // ==========================================
+  // РАСХОДЫ
+  // ==========================================
+  async function openAddExpense() {
+    if (document.getElementById('add-expense-modal')) return; // M5
+
+    if (!activeVehicleId) {
+      showToast('Сначала добавь автомобиль');
+      return;
+    }
 
     const modal = document.createElement('div');
     modal.id = 'add-expense-modal';
-    modal.style.cssText = `position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;`;
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
     modal.innerHTML = `
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый расход</div>
           <button onclick="document.getElementById('add-expense-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
-        
-        <select id="e-category" class="input" style="appearance: none; -webkit-appearance: none;">
+
+        <select id="e-category" class="input">
           <option value="Страхование">Страхование (ОСАГО/КАСКО)</option>
           <option value="Налоги">Транспортный налог</option>
           <option value="Штрафы">Штрафы</option>
@@ -1230,24 +1665,45 @@ async function deleteRefuel(id) {
           <option value="Аксессуары">Аксессуары</option>
           <option value="Прочее">Прочее</option>
         </select>
-        
+
         <input type="number" id="e-amount" class="input" placeholder="Сумма (₽)">
         <input type="date" id="e-date" class="input">
         <input type="text" id="e-comment" class="input" placeholder="Комментарий (необязательно)">
-        <button class="btn" onclick="saveExpense('${vId}')" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
+        <button class="btn" onclick="saveExpense()" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
       </div>
     `;
     document.body.appendChild(modal);
+    expenseFormVehicleId = activeVehicleId;
   }
 
-  async function saveExpense(vehicleId) {
+  async function saveExpense() {
     const category = document.getElementById('e-category').value;
     const amount = document.getElementById('e-amount').value;
     const date = document.getElementById('e-date').value;
     const comment = document.getElementById('e-comment').value.trim();
 
-    if (!amount || !date) {
+    if (amount === '' || !date) {
       showToast('Заполни сумму и дату');
+      return;
+    }
+    const amountNum = num(amount, NaN);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      showToast('Сумма должна быть положительным числом');
+      return;
+    }
+
+    // C1: привязка к активному автомобилю на момент открытия формы
+    const targetVehicleId = expenseFormVehicleId || activeVehicleId;
+    if (!targetVehicleId) {
+      showToast('Сначала добавь автомобиль');
+      return;
+    }
+
+    if (!acquireSave('expense')) return;
+
+    const userId = await getUserId();
+    if (!userId) {
+      releaseSave('expense');
       return;
     }
 
@@ -1255,44 +1711,66 @@ async function deleteRefuel(id) {
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
 
-    const { error } = await db.from('expenses').insert({
-      user_id: (await db.auth.getUser()).data.user.id,
-      vehicle_id: vehicleId,
-      category: category,
-      amount: parseFloat(amount),
-      date: date,
-      comment: comment
-    });
+    try {
+      const { error } = await db.from('expenses').insert({
+        user_id: userId,
+        vehicle_id: targetVehicleId,
+        category: category,
+        amount: amountNum,
+        date: date,
+        comment: comment
+      });
 
-    btn.textContent = 'Сохранить';
-    btn.disabled = false;
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
 
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
       document.getElementById('add-expense-modal').remove();
       showToast('Расход добавлен!');
       loadExpenses();
       loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('expense');
+      if (document.getElementById('save-expense-btn')) {
+        btn.textContent = 'Сохранить';
+        btn.disabled = false;
+      }
     }
   }
 
   async function loadExpenses() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-
-    const { data: records, error } = await db.from('expenses').select('*').order('date', { ascending: false });
-    if (error) return;
-
     const list = document.getElementById('expenses-list');
     const empty = document.getElementById('expenses-empty');
-// Сначала всегда очищаем старые карточки
+
     Array.from(list.children).forEach(child => {
       if (child.id !== 'expenses-empty') child.remove();
     });
-    // А теперь проверяем, есть ли новые запис
+
+    if (!activeVehicleId) {
+      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.style.display = 'block';
+      return;
+    }
+
+    // C2: только расходы активного автомобиля
+    const { data: records, error } = await db
+      .from('expenses')
+      .select('*')
+      .eq('vehicle_id', activeVehicleId)
+      .order('date', { ascending: false });
+
+    if (error) {
+      console.error(error);
+      empty.innerHTML = 'Не удалось загрузить расходы.<br>Проверь соединение.';
+      empty.style.display = 'block';
+      return;
+    }
 
     if (!records || records.length === 0) {
+      empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы записать трату.';
       empty.style.display = 'block';
       return;
     }
@@ -1305,10 +1783,10 @@ async function deleteRefuel(id) {
       card.className = 'card';
       card.style.position = 'relative';
       card.innerHTML = `
-        <button onclick="deleteExpense('${r.id}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-        <div class="card-label" style="padding-right: 60px;">${new Date(r.date).toLocaleDateString('ru-RU')} • ${r.category}</div>
-        <div style="color: var(--accent); font-size: 20px; font-weight: 600;">${r.amount} ₽</div>
-        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${r.comment}</div>` : ''}
+        <button onclick="deleteExpense('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
+        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)} • ${esc(r.category)}</div>
+        <div style="color: var(--accent); font-size: 20px; font-weight: 600;">${fmtNum(r.amount)} ₽</div>
+        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -1316,16 +1794,76 @@ async function deleteRefuel(id) {
 
   async function deleteExpense(id) {
     if (!confirm('Удалить этот расход?')) return;
-    
-    const { error } = await db.from('expenses').delete().eq('id', id);
-    if (error) {
-      showToast('Ошибка: ' + error.message);
-    } else {
+
+    const userId = await getUserId();
+    if (!userId) return;
+
+    try {
+      const { error } = await db.from('expenses').delete().eq('id', id).eq('user_id', userId);
+      if (error) {
+        showToast('Ошибка: ' + error.message);
+        return;
+      }
       showToast('Расход удален');
-      loadExpenses(); // Перерисовываем список
-      loadHome();     // Обновляем главную
+      loadExpenses();
+      loadHome();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
     }
   }
+
+  // ==========================================
+  // ИНИЦИАЛИЗАЦИЯ
+  // ==========================================
+  let loadedForUser = null;
+
+  async function loadAllData() {
+    // Сначала определяем активный автомобиль, потом грузим всё остальное
+    await loadVehicles();
+    await Promise.all([loadHome(), loadMaint(), loadExpenses(), loadRefuels()]);
+  }
+
+  async function init() {
+    let session = null;
+    try {
+      const { data } = await db.auth.getSession();
+      session = data ? data.session : null;
+    } catch (e) {
+      // Нет сети — не роняем приложение, показываем экран входа с сообщением
+      console.error(e);
+      showAuthScreen();
+      showToast('Нет связи с сервером. Проверь интернет.');
+      return;
+    }
+
+    if (session) {
+      showAppScreen();
+      if (loadedForUser !== session.user.id) {
+        loadedForUser = session.user.id;
+        await loadAllData();
+      }
+    } else {
+      showAuthScreen();
+    }
+  }
+
+  db.auth.onAuthStateChange((event, session) => {
+    if (session) {
+      showAppScreen();
+      if (loadedForUser !== session.user.id) {
+        loadedForUser = session.user.id;
+        loadAllData();
+      }
+    } else {
+      // M10: корректный выход — сбрасываем состояние и чистим DOM
+      loadedForUser = null;
+      activeVehicleId = null;
+      localStorage.removeItem('my_garage_active_vehicle');
+      clearAllLists();
+      showAuthScreen();
+    }
+  });
+
   init();
 </script>
 </body>
