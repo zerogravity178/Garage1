@@ -296,6 +296,10 @@
   // C1: активный автомобиль — единый источник истины для всех запросов
   let activeVehicleId = localStorage.getItem('my_garage_active_vehicle') || null;
 
+  // Отличаем «машин нет» от «не удалось загрузить»: иначе при сбое сети
+  // все вкладки писали бы «Сначала добавь автомобиль».
+  let lastVehiclesLoadError = false;
+
   // M5: синхронный флаг для модалок, которые открываются после await
   let maintModalOpening = false;
   let editVehicleModalOpening = false;
@@ -515,6 +519,10 @@
 
   // C5: полная очистка списков (чтобы не оставались карточки прошлого аккаунта)
   function clearAllLists() {
+    // при выходе не должно оставаться привязки формы к чужой машине
+    maintFormVehicleId = null;
+    refuelFormVehicleId = null;
+    expenseFormVehicleId = null;
     [['vehicles-list', 'vehicles-empty'], ['maint-list', 'maint-empty'], ['expenses-list', 'expenses-empty'], ['refuels-list', 'refuels-empty']]
       .forEach(([listId, emptyId]) => {
         const list = document.getElementById(listId);
@@ -525,6 +533,27 @@
       });
     const sel = document.getElementById('active-vehicle-select');
     if (sel) { sel.innerHTML = ''; sel.style.display = 'none'; }
+  }
+
+  // Единая точка закрытия модалок: удаляет элемент и сбрасывает состояние формы,
+  // привязанное к конкретному автомобилю (иначе следующая запись ушла бы
+  // в машину от предыдущей, уже закрытой формы).
+  function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+
+    if (id === 'add-maint-modal') {
+      maintFormVehicleId = null;
+      maintModalOpening = false;
+    } else if (id === 'add-refuel-modal') {
+      refuelFormVehicleId = null;
+    } else if (id === 'add-expense-modal') {
+      expenseFormVehicleId = null;
+    } else if (id === 'edit-vehicle-modal') {
+      editVehicleModalOpening = false;
+    } else if (id === 'update-mileage-modal') {
+      mileageModalOpening = false;
+    }
   }
 
   // C1: переключение активного автомобиля
@@ -546,14 +575,28 @@
   function renderVehicleSelect(vehicles) {
     const sel = document.getElementById('active-vehicle-select');
     if (!sel) return;
-    sel.innerHTML = (vehicles || []).map(v =>
+    const items = vehicles || [];
+    sel.innerHTML = items.map(v =>
       `<option value="${esc(v.id)}">${esc(v.brand || '')} ${esc(v.model || '')}</option>`
     ).join('');
-    if (vehicles && vehicles.length > 1) {
+    if (items.length > 1) {
       sel.style.display = 'block';
-      sel.value = activeVehicleId || '';
+      // Селектор и activeVehicleId всегда согласованы: если сохранённого id
+      // в списке нет, берём первую машину и синхронизируем состояние.
+      const found = items.some(v => v.id === activeVehicleId);
+      if (!found) {
+        activeVehicleId = items[0].id;
+        localStorage.setItem('my_garage_active_vehicle', activeVehicleId);
+      }
+      sel.value = activeVehicleId;
     } else {
       sel.style.display = 'none';
+      // Одна машина — селектора не видно, но активный id должен быть определён,
+      // иначе loadHome/loadMaint и компания получат null.
+      if (items.length === 1 && activeVehicleId !== items[0].id) {
+        activeVehicleId = items[0].id;
+        localStorage.setItem('my_garage_active_vehicle', activeVehicleId);
+      }
     }
   }
 
@@ -574,7 +617,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый автомобиль</div>
-          <button onclick="document.getElementById('add-vehicle-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-vehicle-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <input type="text" id="v-brand" class="input" placeholder="Марка (например, Toyota)">
         <input type="text" id="v-model" class="input" placeholder="Модель (например, Camry)">
@@ -617,7 +660,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Редактировать авто</div>
-          <button onclick="document.getElementById('edit-vehicle-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('edit-vehicle-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${esc(v.brand || '')}">
         <input type="text" id="ev-model" class="input" placeholder="Модель" value="${esc(v.model || '')}">
@@ -690,7 +733,7 @@
         return;
       }
 
-      document.getElementById('edit-vehicle-modal').remove();
+      closeModal('edit-vehicle-modal');
       showToast('Авто обновлено!');
       await loadVehicles();
       loadHome();
@@ -754,7 +797,7 @@
         return;
       }
 
-      document.getElementById('add-vehicle-modal').remove();
+      closeModal('add-vehicle-modal');
       showToast('Автомобиль добавлен!');
       await loadVehicles();
       loadHome();
@@ -788,11 +831,16 @@
 
     if (error) {
       console.error(error);
+      // Не сбрасываем activeVehicleId: он мог остаться рабочим из localStorage,
+      // а при сбое сети данные просто не пришли. Иначе весь интерфейс
+      // покажет «Сначала добавь автомобиль».
+      lastVehiclesLoadError = true;
       empty.innerHTML = 'Не удалось загрузить гараж.<br>Проверь соединение и обнови страницу.';
       empty.style.display = 'block';
       return;
     }
 
+    lastVehiclesLoadError = false;
     const items = vehicles || [];
 
     if (items.length === 0) {
@@ -862,7 +910,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Обновить пробег</div>
-          <button onclick="document.getElementById('update-mileage-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('update-mileage-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${fmtNum(v.current_mileage || 0)} км</p>
 
@@ -922,7 +970,7 @@
         return;
       }
 
-      document.getElementById('update-mileage-modal').remove();
+      closeModal('update-mileage-modal');
       showToast('Пробег обновлен!');
       await loadVehicles();
       loadHome();
@@ -950,12 +998,14 @@
     nameEl.style.fontSize = '20px'; // L1: сбрасываем размер из «пустого» состояния
 
     if (!activeVehicleId) {
-      nameEl.textContent = 'Ещё не добавлен';
+      nameEl.textContent = lastVehiclesLoadError ? 'Не удалось загрузить' : 'Ещё не добавлен';
       nameEl.style.fontSize = '16px';
-      mileageEl.textContent = 'Перейди в «Гараж» → «Добавить авто»';
-      consEl.textContent = 'не указан';
+      mileageEl.textContent = lastVehiclesLoadError
+        ? 'Проверь соединение и обнови страницу'
+        : 'Перейди в «Гараж» → «Добавить авто»';
+      consEl.textContent = lastVehiclesLoadError ? '—' : 'не указан';
       consEl.style.fontSize = '16px';
-      expEl.textContent = '0 ₽';
+      expEl.textContent = lastVehiclesLoadError ? '— ₽' : '0 ₽';
       if (reminderBox) reminderBox.style.display = 'none';
       return;
     }
@@ -1142,7 +1192,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая запись</div>
-          <button onclick="document.getElementById('add-maint-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-maint-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <input type="text" id="m-title" class="input" placeholder="Что сделали? (например, Замена масла)">
@@ -1245,7 +1295,7 @@
         console.error('Не удалось обновить пробег:', e);
       }
 
-      document.getElementById('add-maint-modal').remove();
+      closeModal('add-maint-modal'); // сбрасывает maintFormVehicleId
       showToast('Запись добавлена!');
       loadMaint();
       await loadVehicles();
@@ -1271,7 +1321,7 @@
       <div style="background:var(--card); border-radius:24px 24px 0 0; padding:24px;">
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <div class="section-title" style="margin:0;">Новый вид работ</div>
-          <button onclick="document.getElementById('add-st-modal').remove()" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
+          <button onclick="closeModal('add-st-modal')" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
         </div>
         <input type="text" id="st-name" class="input" placeholder="Название (например, Замена масла)">
         <input type="number" id="st-interval" class="input" placeholder="Интервал (км), например 10000" value="10000">
@@ -1324,8 +1374,7 @@
         sel.value = data.id;
       }
 
-      const stModal = document.getElementById('add-st-modal');
-      if (stModal) stModal.remove();
+      closeModal('add-st-modal');
 
       showToast('Вид работ добавлен!');
     } catch (e) {
@@ -1348,7 +1397,9 @@
     });
 
     if (!activeVehicleId) {
-      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.innerHTML = lastVehiclesLoadError
+        ? 'Не удалось загрузить. Проверь соединение.'
+        : 'Сначала добавь автомобиль в гараже.';
       empty.style.display = 'block';
       return;
     }
@@ -1430,7 +1481,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая заправка</div>
-          <button onclick="document.getElementById('add-refuel-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-refuel-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <input type="date" id="r-date" class="input">
@@ -1536,7 +1587,7 @@
         }
       }
 
-      document.getElementById('add-refuel-modal').remove();
+      closeModal('add-refuel-modal');
       showToast('Заправка добавлена!');
       loadRefuels();
       await loadVehicles();
@@ -1562,9 +1613,11 @@
     });
 
     if (!activeVehicleId) {
-      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.innerHTML = lastVehiclesLoadError
+        ? 'Не удалось загрузить. Проверь соединение.'
+        : 'Сначала добавь автомобиль в гараже.';
       empty.style.display = 'block';
-      if (totalEl) totalEl.textContent = '0 ₽';
+      if (totalEl) totalEl.textContent = lastVehiclesLoadError ? '— ₽' : '0 ₽';
       return;
     }
 
@@ -1653,7 +1706,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый расход</div>
-          <button onclick="document.getElementById('add-expense-modal').remove()" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-expense-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <select id="e-category" class="input">
@@ -1726,7 +1779,7 @@
         return;
       }
 
-      document.getElementById('add-expense-modal').remove();
+      closeModal('add-expense-modal');
       showToast('Расход добавлен!');
       loadExpenses();
       loadHome();
@@ -1750,7 +1803,9 @@
     });
 
     if (!activeVehicleId) {
-      empty.innerHTML = 'Сначала добавь автомобиль в гараже.';
+      empty.innerHTML = lastVehiclesLoadError
+        ? 'Не удалось загрузить. Проверь соединение.'
+        : 'Сначала добавь автомобиль в гараже.';
       empty.style.display = 'block';
       return;
     }
@@ -1816,11 +1871,27 @@
   // ИНИЦИАЛИЗАЦИЯ
   // ==========================================
   let loadedForUser = null;
+  let loadAllPromise = null;
 
   async function loadAllData() {
-    // Сначала определяем активный автомобиль, потом грузим всё остальное
-    await loadVehicles();
-    await Promise.all([loadHome(), loadMaint(), loadExpenses(), loadRefuels()]);
+    // Защита от параллельного запуска: init() и onAuthStateChange (событие
+    // INITIAL_SESSION) могут сработать почти одновременно — без этого
+    // получался двойной цикл запросов при старте.
+    if (loadAllPromise) return loadAllPromise;
+
+    loadAllPromise = (async () => {
+      // Сначала определяем активный автомобиль, потом грузим всё остальное.
+      // loadVehicles() только рисует гараж и селектор — остальные данные
+      // грузятся здесь ровно один раз.
+      await loadVehicles();
+      await Promise.all([loadHome(), loadMaint(), loadExpenses(), loadRefuels()]);
+    })();
+
+    try {
+      await loadAllPromise;
+    } finally {
+      loadAllPromise = null;
+    }
   }
 
   async function init() {
@@ -1858,6 +1929,7 @@
       // M10: корректный выход — сбрасываем состояние и чистим DOM
       loadedForUser = null;
       activeVehicleId = null;
+      lastVehiclesLoadError = false;
       localStorage.removeItem('my_garage_active_vehicle');
       clearAllLists();
       showAuthScreen();
