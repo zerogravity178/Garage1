@@ -429,7 +429,7 @@
       border-radius: var(--radius-btn);
       box-shadow: none;
     }
-    .card-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .card-actions { display: flex; gap: 12px; margin-top: 16px; }
     .card-actions .btn {
       flex: 1;
       padding: 12px 14px;
@@ -481,6 +481,241 @@
       margin-left: 6px;
       vertical-align: middle;
     }
+
+    /* Нижний отступ = высота навигации + зона FAB: иначе последняя
+       карточка списка уезжает под плавающую кнопку «+». Делаем это
+       только у списков, чтобы не раздувать пустоту на Главной. */
+    #vehicles-list, #maint-list, #expenses-list, #refuels-list { padding-bottom: 78px; }
+    /* ================= ИНДИКАТОР АКТИВНОЙ МАШИНЫ В ШАПКЕ ================= */
+    .header-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .header-vehicle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      max-width: 220px;
+      min-width: 0;
+    }
+    .header-vehicle .dot {
+      flex: none;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(0, 229, 192, 0.75);
+    }
+    .header-vehicle .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ================= ЧИПСЫ В КАРТОЧКЕ ГАРАЖА ================= */
+    .vehicle-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 12px;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
+    .chip b { color: var(--text); font-weight: 700; }
+    .chip.is-active {
+      color: var(--accent);
+      border-color: rgba(0, 229, 192, 0.35);
+      background: var(--accent-soft);
+    }
+
+    /* ================= КАРТОЧКИ СПИСКОВ (ТО / РАСХОДЫ / ЗАПРАВКИ) ================= */
+    .item-card { position: relative; padding: 18px 20px; }
+    .item-head { display: flex; align-items: baseline; gap: 12px; padding-right: 26px; }
+    .item-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      overflow-wrap: anywhere;
+    }
+    .item-amount {
+      flex: none;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .item-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+    .item-meta .ico { margin-right: 5px; opacity: 0.85; }
+    .item-comment {
+      margin-top: 10px;
+      padding: 9px 11px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-dim);
+      overflow-wrap: anywhere;
+    }
+    .item-delete {
+      position: absolute;
+      top: 10px; right: 8px;
+      width: 32px; height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      border-radius: 999px;
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 0.15s, background 0.15s;
+    }
+    .item-delete:active { background: rgba(255, 90, 95, 0.14); color: var(--danger); }
+
+    /* ================= СВОДКА ПО ТОПЛИВУ ЗА МЕСЯЦ ================= */
+    .refuel-summary {
+      border: 1px solid rgba(0, 229, 192, 0.28);
+      background:
+        radial-gradient(120% 130% at 8% 0%, rgba(0, 229, 192, 0.16), rgba(0, 229, 192, 0) 62%),
+        var(--glass);
+    }
+    .refuel-sum-value {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--accent);
+      line-height: 1.2;
+    }
+
+    /* ================= FAB: КОНТЕКСТНАЯ КНОПКА «+» ================= */
+    .fab {
+      position: fixed;
+      right: 20px;
+      bottom: 104px;
+      /* на iPhone прибавляем высоту «домашней полосы», иначе кнопка на ней */
+      bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent);
+      color: #061412;
+      font-size: 30px;
+      font-weight: 400;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-family: inherit;
+      z-index: 120;
+      box-shadow: 0 10px 28px rgba(0, 229, 192, 0.35), 0 2px 8px rgba(0, 0, 0, 0.45);
+      transition: transform 0.15s, background 0.15s;
+    }
+    .fab:active { transform: scale(0.94); background: var(--accent-dim); }
+    .fab-backdrop {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(9, 10, 12, 0.55);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 129;
+    }
+    .fab-menu {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 178px;
+      bottom: calc(178px + env(safe-area-inset-bottom, 0px));
+      max-width: 420px;
+      margin: 0 auto;
+      background: var(--glass-strong);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 8px;
+      z-index: 130;
+      box-shadow: var(--shadow);
+      animation: fabIn 0.16s ease-out;
+    }
+    @keyframes fabIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    .fab-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 14px 16px;
+      background: none;
+      border: none;
+      border-radius: 16px;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .fab-menu-item:active { background: rgba(255, 255, 255, 0.06); }
+    .fab-menu-item .ic { flex: none; width: 22px; text-align: center; font-size: 18px; color: var(--accent); }
+
+    /* ================= КАСТОМНОЕ ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ================= */
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(255, 90, 95, 0.3);
+    }
+    .btn-danger:active { background: #E14B50; }
+    .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .confirm-list {
+      margin: 0 0 16px;
+      padding-left: 20px;
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .confirm-check {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .confirm-check input {
+      width: 20px;
+      height: 20px;
+      flex: none;
+      accent-color: var(--danger);
+    }
   </style>
 </head>
 <body>
@@ -530,7 +765,14 @@
 <!-- ЭКРАН ПРИЛОЖЕНИЯ -->
 <div id="screen-app" class="screen">
   <div class="header">
-    <div class="logo">MY <span>GARAGE</span></div>
+    <div class="header-left">
+      <div class="logo">MY <span>GARAGE</span></div>
+      <!-- Индикатор активной машины: всегда видно, к чему привяжутся данные -->
+      <div class="header-vehicle" id="header-vehicle" style="display: none;">
+        <span class="dot"></span>
+        <span class="name" id="header-vehicle-name">—</span>
+      </div>
+    </div>
     <button class="logout" onclick="logout()">Выйти</button>
   </div>
 
@@ -600,7 +842,9 @@
   <div id="tab-garage" class="tab-content" style="display: none;">
     <div class="row-between">
       <div class="section-title">Мой гараж</div>
-      <button class="btn fab-add" onclick="openAddVehicle()">+ Добавить</button>
+      <!-- Кнопка нужна, только когда машин нет: при непустом гараже
+           добавление живёт в FAB «+», дублировать не будем -->
+      <button class="btn fab-add" id="garage-add-btn" onclick="openAddVehicle()">+ Добавить</button>
     </div>
 
     <div id="vehicles-list">
@@ -613,11 +857,10 @@
   <div id="tab-maint" class="tab-content" style="display: none;">
     <div class="row-between">
       <div class="section-title">Обслуживание</div>
-      <button class="btn fab-add" onclick="openAddMaint()">+ Добавить</button>
     </div>
 
     <div id="maint-list">
-      <div class="empty" id="maint-empty">Пока пусто.<br>Нажми «Добавить», чтобы записать ремонт.</div>
+      <div class="empty" id="maint-empty">Пока пусто.<br>Нажми «+», чтобы записать ремонт.</div>
     </div>
   </div>
 
@@ -625,11 +868,10 @@
   <div id="tab-expenses" class="tab-content" style="display: none;">
     <div class="row-between">
       <div class="section-title">Расходы</div>
-      <button class="btn fab-add" onclick="openAddExpense()">+ Добавить</button>
     </div>
 
     <div id="expenses-list">
-      <div class="empty" id="expenses-empty">Пока пусто.<br>Нажми «Добавить», чтобы записать трату.</div>
+      <div class="empty" id="expenses-empty">Пока пусто.<br>Нажми «+», чтобы записать трату.</div>
     </div>
   </div>
 
@@ -637,34 +879,38 @@
   <div id="tab-refuels" class="tab-content" style="display: none;">
     <div class="row-between">
       <div class="section-title">Заправки</div>
-      <button class="btn fab-add" onclick="openAddRefuel()">+ Добавить</button>
     </div>
 
-    <div class="card">
+    <div class="card refuel-summary">
       <div class="card-label">Потрачено на топливо за месяц</div>
-      <div class="card-value accent" id="refuel-month-total">— ₽</div>
+      <div class="refuel-sum-value" id="refuel-month-total">— ₽</div>
     </div>
 
     <div id="refuels-list">
-      <div class="empty" id="refuels-empty">Пока пусто.<br>Добавь первую заправку.</div>
+      <div class="empty" id="refuels-empty">Пока пусто.<br>Нажми «+», чтобы добавить первую заправку.</div>
     </div>
   </div>
 
+  <!-- FAB: контекстная кнопка добавления (одна на все вкладки) -->
+  <button class="fab" id="fab-add" onclick="toggleFabMenu(event)" aria-label="Добавить" style="display: none;">+</button>
+  <div class="fab-backdrop" id="fab-backdrop" onclick="closeFabMenu()" style="display: none;"></div>
+  <div class="fab-menu" id="fab-menu" style="display: none;"></div>
+
   <!-- НАВИГАЦИЯ -->
   <div class="nav">
-    <button class="nav-item active" onclick="switchTab('home', this)">
+    <button class="nav-item active" data-tab="home" onclick="switchTab('home', this)">
       <span class="nav-icon">⌂</span>Главная
     </button>
-    <button class="nav-item" onclick="switchTab('garage', this)">
+    <button class="nav-item" data-tab="garage" onclick="switchTab('garage', this)">
       <span class="nav-icon">▤</span>Гараж
     </button>
-    <button class="nav-item" onclick="switchTab('maint', this)">
+    <button class="nav-item" data-tab="maint" onclick="switchTab('maint', this)">
       <span class="nav-icon">⚙</span>ТО
     </button>
-    <button class="nav-item" onclick="switchTab('expenses', this)">
+    <button class="nav-item" data-tab="expenses" onclick="switchTab('expenses', this)">
       <span class="nav-icon">₽</span>Расходы
     </button>
-    <button class="nav-item" onclick="switchTab('refuels', this)">
+    <button class="nav-item" data-tab="refuels" onclick="switchTab('refuels', this)">
       <span class="nav-icon">⛽</span>Заправки
     </button>
   </div>
@@ -686,6 +932,9 @@
   // все вкладки писали бы «Сначала добавь автомобиль».
   let lastVehiclesLoadError = false;
 
+  // Сколько машин в гараже: от этого зависит видимость FAB на вкладке «Гараж»
+  let vehiclesCount = 0;
+
   // M5: синхронный флаг для модалок, которые открываются после await
   let maintModalOpening = false;
   let editVehicleModalOpening = false;
@@ -699,6 +948,15 @@
 
   // C4: экранирование пользовательских данных перед вставкой в HTML
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Сегодняшняя дата в формате YYYY-MM-DD ПО МЕСТНОМУ времени.
+  // toISOString() не годится: он переводит в UTC, и вечером в Москве
+  // (UTC+3) форма подставляла бы вчерашнее число.
+  function todayStr() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
 
   // Приведение чисел (в базе numeric приходит строкой)
   const num = (v, def = 0) => {
@@ -896,11 +1154,140 @@
   // ==========================================
   // ЭКРАНЫ И НАВИГАЦИЯ
   // ==========================================
-  function switchTab(name, btn) {
+  const TAB_KEY = 'my_garage_active_tab';
+  const TABS = ['home', 'garage', 'maint', 'expenses', 'refuels'];
+  // У каждой вкладки — своя «умная» кнопка «+».
+  // key — имя действия, а не код: обработчик вызывается напрямую,
+  // без eval/new Function (CSP и «строгий» режим не мешают).
+  const FAB_ACTIONS = {
+    home: { label: 'Добавить авто', ic: '🚗', action: 'addVehicle' },
+    garage: { label: 'Добавить авто', ic: '🚗', action: 'addVehicle' },
+    maint: { label: 'Добавить запись ТО', ic: '⚙', action: 'addMaint' },
+    expenses: { label: 'Добавить расход', ic: '₽', action: 'addExpense' },
+    refuels: { label: 'Добавить заправку', ic: '⛽', action: 'addRefuel' }
+  };
+  // Вкладки, которые грузят записи активной машины, — без машины в них нечего делать
+  const TABS_NEED_VEHICLE = { maint: true, expenses: true, refuels: true };
+
+  let currentTab = 'home';
+
+  function readSavedTab() {
+    try {
+      const saved = localStorage.getItem(TAB_KEY);
+      return TABS.indexOf(saved) !== -1 ? saved : 'home';
+    } catch (e) {
+      return 'home';
+    }
+  }
+
+  function applyTab(name) {
+    const tab = TABS.indexOf(name) !== -1 ? name : 'home';
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-    document.getElementById('tab-' + name).style.display = 'block';
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    if (btn) btn.classList.add('active');
+    const target = document.getElementById('tab-' + tab);
+    if (target) target.style.display = 'block';
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+    });
+    currentTab = tab;
+    updateFab();
+    return tab;
+  }
+
+  function switchTab(name, btn) {
+    const tab = applyTab(name);
+    try { localStorage.setItem(TAB_KEY, tab); } catch (e) { /* приватный режим */ }
+    window.scrollTo(0, 0);
+  }
+
+  // ---------- FAB ----------
+  // «+» видна везде, кроме Главной и пустого Гаража: там добавление авто
+  // и так на виду кнопкой в заголовке.
+  function isFabVisible() {
+    if (currentTab === 'home') return false;
+    if (currentTab === 'garage') return !lastVehiclesLoadError && vehiclesCount > 0;
+    return true;
+  }
+
+  function updateFab() {
+    const fab = document.getElementById('fab-add');
+    if (fab) fab.style.display = isFabVisible() ? 'flex' : 'none';
+    // Кнопка «+ Добавить» в заголовке гаража нужна, только когда машины нет
+    // на экране (пустой гараж или список не загрузился): при непустом
+    // гараже ту же роль выполняет FAB — не дублируем его.
+    const addBtn = document.getElementById('garage-add-btn');
+    if (addBtn) addBtn.style.display = (vehiclesCount > 0 && !lastVehiclesLoadError) ? 'none' : '';
+    if (!isFabVisible()) closeFabMenu();
+  }
+
+  function toggleFabMenu(event) {
+    if (event) event.stopPropagation();
+    const menu = document.getElementById('fab-menu');
+    if (!menu) return;
+    if (menu.style.display !== 'none') { closeFabMenu(); return; }
+
+    // Без активной машины «+» не открывает форму: сначала гараж
+    if (!activeVehicleId && TABS_NEED_VEHICLE[currentTab]) {
+      showToast('Сначала добавьте автомобиль');
+      switchTab('garage', document.querySelector('.nav-item[data-tab="garage"]'));
+      return;
+    }
+
+    const action = FAB_ACTIONS[currentTab] || FAB_ACTIONS.home;
+    menu.innerHTML = `
+      <button class="fab-menu-item" onclick="runFabAction('${action.action}')">
+        <span class="ic">${action.ic}</span>${esc(action.label)}
+      </button>
+    `;
+    menu.style.display = 'block';
+    const backdrop = document.getElementById('fab-backdrop');
+    if (backdrop) backdrop.style.display = 'block';
+  }
+
+  function runFabAction(action) {
+    closeFabMenu();
+    const runners = {
+      addVehicle: () => openAddVehicle(),
+      addMaint: () => openAddMaint(),
+      addExpense: () => openAddExpense(),
+      addRefuel: () => openAddRefuel()
+    };
+    const fn = runners[action];
+    if (!fn) return;
+    // Даём меню исчезнуть, чтобы модалка открылась на чистом фоне
+    setTimeout(() => {
+      try { fn(); } catch (e) { console.error('FAB action failed:', e); }
+    }, 0);
+  }
+
+  function closeFabMenu() {
+    const menu = document.getElementById('fab-menu');
+    const backdrop = document.getElementById('fab-backdrop');
+    if (menu) { menu.style.display = 'none'; menu.innerHTML = ''; }
+    if (backdrop) backdrop.style.display = 'none';
+  }
+
+  // Индикатор активной машины в шапке — чтобы всегда было видно,
+  // к какому авто привяжется следующая запись.
+  function renderHeaderVehicle(vehicles) {
+    const box = document.getElementById('header-vehicle');
+    const nameEl = document.getElementById('header-vehicle-name');
+    if (!box || !nameEl) return;
+
+    const items = vehicles || [];
+    const active = items.find(v => v.id === activeVehicleId);
+    const label = active
+      ? `${active.brand || ''} ${active.model || ''}`.trim()
+      : '';
+
+    if (!label) {
+      box.style.display = 'none';
+      nameEl.textContent = '';
+      nameEl.removeAttribute('title');
+      return;
+    }
+    nameEl.textContent = label;
+    nameEl.title = label; // полное имя во всплывающей подсказке, если обрезано
+    box.style.display = 'flex';
   }
 
   function showAppScreen() {
@@ -929,6 +1316,11 @@
       });
     const sel = document.getElementById('active-vehicle-select');
     if (sel) { sel.innerHTML = ''; sel.style.display = 'none'; }
+
+    // при выходе не должен остаться ни индикатор машины, ни «+» с чужими данными
+    vehiclesCount = 0;
+    renderHeaderVehicle([]);
+    updateFab();
   }
 
   // Единая точка закрытия модалок: удаляет элемент и сбрасывает состояние формы,
@@ -1497,6 +1889,8 @@
       // а при сбое сети данные просто не пришли. Иначе весь интерфейс
       // покажет «Сначала добавь автомобиль».
       lastVehiclesLoadError = true;
+      renderHeaderVehicle([]);
+      updateFab();
       empty.innerHTML = 'Не удалось загрузить гараж.<br>Проверь соединение и обнови страницу.';
       empty.style.display = 'block';
       return;
@@ -1504,11 +1898,14 @@
 
     lastVehiclesLoadError = false;
     const items = vehicles || [];
+    vehiclesCount = items.length;
 
     if (items.length === 0) {
       activeVehicleId = null;
       localStorage.removeItem('my_garage_active_vehicle');
       renderVehicleSelect([]);
+      renderHeaderVehicle([]);
+      updateFab();
       empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы внести машину.';
       empty.style.display = 'block';
       return;
@@ -1522,15 +1919,40 @@
 
     empty.style.display = 'none';
     renderVehicleSelect(items);
+    renderVehicles(items);
+    renderHeaderVehicle(items);
+    updateFab();
+  }
 
-    items.forEach(v => {
+  // Карточки гаража: название, чипсы «год / пробег», кнопки в один ряд.
+  // Метка «активный» — на плашке названия, чтобы сразу видеть,
+  // к какой машине привяжутся новые записи.
+  function renderVehicles(vehicles) {
+    const list = document.getElementById('vehicles-list');
+    if (!list) return;
+
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'vehicles-empty') child.remove();
+    });
+
+    (vehicles || []).forEach(v => {
+      const isActive = v.id === activeVehicleId;
+      const year = v.year === null || v.year === undefined || v.year === '' ? '' : String(v.year);
+      const mileage = v.current_mileage === null || v.current_mileage === undefined || v.current_mileage === ''
+        ? ''
+        : `${fmtNum(num(v.current_mileage, 0))} км`;
+
+      const chips = [];
+      if (year) chips.push(`<span class="chip"><span class="ico">📅</span>${esc(year)}</span>`);
+      if (mileage) chips.push(`<span class="chip"><span class="ico">🏁</span><b>${esc(mileage)}</b></span>`);
+      if (isActive) chips.push('<span class="chip is-active">● активный</span>');
+
       const card = document.createElement('div');
       card.className = 'card';
-      const isActive = v.id === activeVehicleId;
+      card.id = 'vehicle-card-' + v.id;
       card.innerHTML = `
-        <div class="card-label">${esc(v.year || 'Год не указан')}${isActive ? ' • активный' : ''}</div>
         <div class="vehicle-name">${esc(v.brand || '')} ${esc(v.model || '')}</div>
-        <div class="muted" style="margin-top: 0;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
+        <div class="vehicle-chips">${chips.join('') || '<span class="chip">данные не заполнены</span>'}</div>
         <div class="card-actions">
           <button class="btn btn-soft" onclick="openEditVehicle('${esc(v.id)}')">Редактировать</button>
           <button class="btn btn-danger-soft" onclick="deleteVehicle('${esc(v.id)}', '${jsStr((v.brand || '') + ' ' + (v.model || ''))}')">Удалить</button>
@@ -1554,12 +1976,66 @@
 
   // Полное удаление автомобиля вместе со всей историей.
   // ON DELETE CASCADE в БД не используется — удаляем явно, по порядку.
-  async function deleteVehicle(id, name) {
-    if (!confirm(`Удалить автомобиль «${name}»?\n\nВместе с ним будут удалены ВСЕ записи:\n• обслуживание\n• заправки\n• расходы\n\nВосстановить будет невозможно.`)) return;
-    if (!confirm(`Точно удалить «${name}» и всю историю?\n\nНажми ОК для подтверждения.`)) return;
+  // Подтверждение — кастомная модалка в стиле приложения вместо системного
+  // confirm(): он блокирует поток и выглядит чужеродно на телефоне.
+  function deleteVehicle(id, name) {
+    const modalId = 'confirm-delete-vehicle-modal';
+    if (document.getElementById(modalId)) return;
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(9, 10, 12, 0.72); z-index: 1100;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      display: flex; flex-direction: column; justify-content: flex-end;
+    `;
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div class="section-title" style="margin: 0;">Удалить автомобиль?</div>
+          <button onclick="closeModal('${modalId}')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
+        </div>
+
+        <p style="font-size: 15px; font-weight: 600; margin-bottom: 10px; overflow-wrap: anywhere;">«${esc(name)}»</p>
+        <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 10px;">Вместе с автомобилем будут удалены:</p>
+        <ul class="confirm-list">
+          <li>обслуживание</li>
+          <li>заправки</li>
+          <li>расходы</li>
+        </ul>
+        <p style="color: var(--danger); font-size: 13px; font-weight: 600; margin-bottom: 16px;">Восстановить будет невозможно.</p>
+
+        <label class="confirm-check">
+          <input type="checkbox" id="cdv-check">
+          <span>Понимаю, что история удалится навсегда</span>
+        </label>
+
+        <button class="btn btn-danger" id="cdv-confirm-btn" onclick="confirmDeleteVehicle('${esc(id)}', '${jsStr(name)}')" disabled>Удалить</button>
+        ${cancelBtn(modalId)}
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const check = document.getElementById('cdv-check');
+    const confirmBtn = document.getElementById('cdv-confirm-btn');
+    if (check && confirmBtn) {
+      check.addEventListener('change', () => { confirmBtn.disabled = !check.checked; });
+    }
+    // Клик по фону/крестику закрывает, если не начали удаление
+    setupModal(modal, 'cdv-check');
+  }
+
+  async function confirmDeleteVehicle(id, name) {
+    const btn = document.getElementById('cdv-confirm-btn');
+    const check = document.getElementById('cdv-check');
+    // Страховка: удалить можно только с явной галочкой
+    if (!check || !check.checked) return;
 
     // блокировка ставится синхронно, до первого await
     if (!acquireSave('deleteVehicle')) return;
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Удаляем...'; }
 
     try {
       const userId = await getUserId();
@@ -1587,6 +2063,7 @@
         localStorage.removeItem('my_garage_active_vehicle');
       }
 
+      closeModal('confirm-delete-vehicle-modal');
       showToast('Автомобиль удалён');
       await loadVehicles();
       loadHome();
@@ -1597,6 +2074,11 @@
       showToast('Ошибка сети: ' + e.message);
     } finally {
       releaseSave('deleteVehicle');
+      // модалку могло уже не быть (успешное удаление) — проверяем существование
+      if (document.getElementById('cdv-confirm-btn')) {
+        btn.textContent = 'Удалить';
+        btn.disabled = !(document.getElementById('cdv-check') || {}).checked;
+      }
     }
   }
 
@@ -2022,7 +2504,7 @@
           ${options}
         </select>
 
-        <input type="date" id="m-date" class="input">
+        <input type="date" id="m-date" class="input" value="${todayStr()}">
         <input type="number" id="m-mileage" class="input" placeholder="Пробег (км)">
         <input type="number" id="m-cost" class="input" placeholder="Стоимость (₽)">
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
@@ -2243,7 +2725,7 @@
     }
 
     if (!records || records.length === 0) {
-      empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы записать ремонт.';
+      empty.innerHTML = 'Пока пусто.<br>Нажми «+» внизу справа, чтобы записать ремонт.';
       empty.style.display = 'block';
       return;
     }
@@ -2253,14 +2735,24 @@
     records.forEach(r => {
       const card = document.createElement('div');
       card.id = 'maint-card-' + r.id;
-      card.className = 'card';
-      card.className = 'card maint-card';
+      card.className = 'card item-card';
+      const amount = r.cost === null || r.cost === undefined
+        ? '—'
+        : (num(r.cost, 0) > 0 ? fmtMoney(num(r.cost, 0)) : 'без стоимости');
+      const mileageStr = r.mileage === null || r.mileage === undefined
+        ? ''
+        : `<span><span class="ico">🏁</span>${fmtNum(num(r.mileage, 0))} км</span>`;
       card.innerHTML = `
-        <button class="maint-delete" onclick="deleteMaint('${esc(r.id)}')">Удалить</button>
-        <div class="card-label">${formatDate(r.date)} • ${fmtNum(r.mileage)} км</div>
-        <div style="font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px;">${esc(r.title)}</div>
-        <div class="money">${r.cost === null || r.cost === undefined ? '—' : fmtMoney(num(r.cost, 0))}</div>
-        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
+        <button class="item-delete" onclick="deleteMaint('${esc(r.id)}')" aria-label="Удалить запись">✕</button>
+        <div class="item-head">
+          <div class="item-title">${esc(r.title || 'Работа без названия')}</div>
+          <div class="item-amount">${amount}</div>
+        </div>
+        <div class="item-meta">
+          <span><span class="ico">📅</span>${formatDate(r.date)}</span>
+          ${mileageStr}
+        </div>
+        ${r.comment ? `<div class="item-comment">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -2308,7 +2800,7 @@
           <button onclick="closeModal('add-refuel-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
-        <input type="date" id="r-date" class="input">
+        <input type="date" id="r-date" class="input" value="${todayStr()}">
         <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
         <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
         <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
@@ -2473,7 +2965,7 @@
     }
 
     if (!records || records.length === 0) {
-      empty.innerHTML = 'Пока пусто.<br>Добавь первую заправку.';
+      empty.innerHTML = 'Пока пусто.<br>Нажми «+» внизу справа, чтобы добавить заправку.';
       empty.style.display = 'block';
       if (totalEl) totalEl.textContent = '0 ₽';
       return;
@@ -2493,15 +2985,34 @@
     records.forEach(r => {
       const card = document.createElement('div');
       card.id = 'refuel-card-' + r.id;
-      card.className = 'card maint-card';
-      const mileageStr = r.mileage ? ' • ' + fmtNum(r.mileage) + ' км' : '';
-      const fullStr = r.is_full_tank ? '<span class="refuel-tag">полный бак</span>' : '';
+      card.className = 'card item-card';
+
+      const liters = num(r.liters, 0);
+      const hasCost = !(r.total_cost === null || r.total_cost === undefined);
+      const total = hasCost ? num(r.total_cost, 0) : null;
+      // Цену за литр показываем только когда есть и сумма, и объём
+      const perLiter = (hasCost && liters > 0) ? (total / liters) : null;
+
+      const mileageStr = r.mileage === null || r.mileage === undefined || r.mileage === ''
+        ? ''
+        : `<span><span class="ico">🏁</span>${fmtNum(num(r.mileage, 0))} км</span>`;
+      const perLiterStr = perLiter !== null
+        ? `<span><span class="ico">💧</span>${perLiter.toFixed(2).replace('.', ',')} ₽/л</span>`
+        : '';
+      const fullStr = r.is_full_tank ? ' <span class="refuel-tag">полный бак</span>' : '';
+
       card.innerHTML = `
-        <button class="maint-delete" onclick="deleteRefuel('${esc(r.id)}')">Удалить</button>
-        <div class="card-label">${formatDate(r.date)}${mileageStr}</div>
-        <div style="font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px;">${fmtNum(r.liters)} л ${fullStr}</div>
-        <div class="money">${r.total_cost === null || r.total_cost === undefined ? '— ₽' : fmtMoney(num(r.total_cost, 0))}</div>
-        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
+        <button class="item-delete" onclick="deleteRefuel('${esc(r.id)}')" aria-label="Удалить заправку">✕</button>
+        <div class="item-head">
+          <div class="item-title">${fmtNum(liters)} л${fullStr}</div>
+          <div class="item-amount">${hasCost ? fmtMoney(total) : '— ₽'}</div>
+        </div>
+        <div class="item-meta">
+          <span><span class="ico">📅</span>${formatDate(r.date)}</span>
+          ${mileageStr}
+          ${perLiterStr}
+        </div>
+        ${r.comment ? `<div class="item-comment">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -2559,7 +3070,7 @@
         </select>
 
         <input type="number" id="e-amount" class="input" placeholder="Сумма (₽)">
-        <input type="date" id="e-date" class="input">
+        <input type="date" id="e-date" class="input" value="${todayStr()}">
         <input type="text" id="e-comment" class="input" placeholder="Комментарий (необязательно)">
         <button class="btn" onclick="saveExpense()" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
         ${cancelBtn('add-expense-modal')}
@@ -2666,7 +3177,7 @@
     }
 
     if (!records || records.length === 0) {
-      empty.innerHTML = 'Пока пусто.<br>Нажми «Добавить», чтобы записать трату.';
+      empty.innerHTML = 'Пока пусто.<br>Нажми «+» внизу справа, чтобы записать трату.';
       empty.style.display = 'block';
       return;
     }
@@ -2676,13 +3187,17 @@
     records.forEach(r => {
       const card = document.createElement('div');
       card.id = 'expense-card-' + r.id;
-      card.className = 'card';
-      card.className = 'card maint-card';
+      card.className = 'card item-card';
       card.innerHTML = `
-        <button class="maint-delete" onclick="deleteExpense('${esc(r.id)}')">Удалить</button>
-        <div class="card-label">${formatDate(r.date)} • ${esc(r.category)}</div>
-        <div class="money">${fmtMoney(num(r.amount, 0))}</div>
-        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
+        <button class="item-delete" onclick="deleteExpense('${esc(r.id)}')" aria-label="Удалить расход">✕</button>
+        <div class="item-head">
+          <div class="item-title">${esc(r.category || 'Без категории')}</div>
+          <div class="item-amount">${fmtMoney(num(r.amount, 0))}</div>
+        </div>
+        <div class="item-meta">
+          <span><span class="ico">📅</span>${formatDate(r.date)}</span>
+        </div>
+        ${r.comment ? `<div class="item-comment">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -2750,6 +3265,8 @@
 
     if (session) {
       showAppScreen();
+      // Возвращаемся на ту вкладку, где пользователь был до перезагрузки
+      applyTab(readSavedTab());
       if (loadedForUser !== session.user.id) {
         loadedForUser = session.user.id;
         await loadAllData();
@@ -2762,6 +3279,8 @@
   db.auth.onAuthStateChange((event, session) => {
     if (session) {
       showAppScreen();
+      // При входе тоже восстанавливаем вкладку (если страница уже была открыта)
+      applyTab(readSavedTab());
       if (loadedForUser !== session.user.id) {
         loadedForUser = session.user.id;
         loadAllData();
@@ -2773,9 +3292,16 @@
       lastVehiclesLoadError = false;
       localStorage.removeItem('my_garage_active_vehicle');
       clearAllLists();
+      // следующая сессия начнётся с «Главной»: чужие вкладки не наследуем
+      currentTab = 'home';
+      applyTab('home');
       showAuthScreen();
     }
   });
+
+  // Восстанавливаем вкладку сразу: пока идёт getSession(), интерфейс уже
+  // выглядит так, как будто пользователь остался там же.
+  applyTab(readSavedTab());
 
   init();
 
