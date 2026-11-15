@@ -1,7 +1,9 @@
-const CACHE_VERSION = 'my-garage-v4';
+const CACHE_VERSION = 'my-garage-v5';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
+
 const SHELL_URLS = ['./', './index.html', './manifest.json'];
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -21,6 +23,7 @@ self.addEventListener('install', (event) => {
     })()
   );
 });
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
@@ -34,16 +37,22 @@ self.addEventListener('activate', (event) => {
     })()
   );
 });
+
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+
   // Только GET и только свой origin/Supabase Storage для картинок.
   if (req.method !== 'GET') return;
+
   const url = new URL(req.url);
+
   // Данные Supabase и Storage — всегда сеть, никогда кэш.
   if (url.hostname.endsWith('supabase.co') || url.hostname.endsWith('supabase.in')) return;
+
   // Навигация: сеть → кэш
   if (req.mode === 'navigate') {
     event.respondWith(
@@ -66,11 +75,13 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+
   // Шрифты Google Fonts и прочая статика — кэш с фоновым обновлением
   const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   const isStatic =
     url.origin === self.location.origin &&
     /\.(?:css|js|png|jpe?g|svg|webp|ico|json|woff2?)$/i.test(url.pathname);
+
   if (isFont || isStatic) {
     event.respondWith(
       (async () => {
