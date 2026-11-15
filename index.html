@@ -9,6 +9,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    /* элементы форм не наследуют шрифт по умолчанию — иначе интерфейс
+       смешивает системный Arial с основным шрифтом */
+    button, input, select, textarea { font-family: inherit; }
     :root {
       --bg: #0E0F11;
       --card: #17191C;
@@ -48,15 +51,19 @@
       font-weight: 600;
       width: 100%;
       cursor: pointer;
+      font-family: inherit;
       transition: background 0.15s;
     }
     .btn:active { background: var(--accent-dim); }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    /* Крестики «×» в шапке модалок — кнопки без класса .btn, курсор им нужен отдельно */
+    .modal-close { cursor: pointer; }
     .btn-outline {
       background: transparent;
       color: var(--text);
       border: 1px solid var(--border);
     }
+    .btn-outline:active { background: var(--card); }
     .input {
       width: 100%;
       background: var(--card);
@@ -67,9 +74,12 @@
       color: var(--text);
       margin-bottom: 12px;
       outline: none;
+      /* без этого поля ввода рисуются системным Arial вместо шрифта интерфейса */
+      font-family: inherit;
     }
     .input:focus { border-color: var(--accent); }
-    select.input { appearance: none; -webkit-appearance: none; }
+    select.input { appearance: none; -webkit-appearance: none; font-family: inherit; }
+    textarea.input { resize: vertical; font-family: inherit; }
     .card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -323,12 +333,22 @@
   const fmtNum = (v) => num(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
   const fmtMoney = (v) => fmtNum(v) + ' ₽';
 
-  // Даты: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса
+  // Даты: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса.
+  // Возвращаем '—' для null/undefined/пустых и для несуществующих дат
+  // (2026-13-45, 2026-02-31), иначе в списке появился бы «45.13.2026».
   function formatDate(s) {
-    if (!s) return '—';
-    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[3]}.${m[2]}.${m[1]}`;
-    const d = new Date(s);
+    if (s === null || s === undefined || s === '') return '—';
+    if (typeof s === 'number' || typeof s === 'boolean') return '—';
+    const str = String(s);
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+      const probe = new Date(Date.UTC(y, mo - 1, d));
+      const ok = probe.getUTCFullYear() === y && probe.getUTCMonth() === mo - 1 && probe.getUTCDate() === d;
+      if (!ok) return '—';
+      return `${m[3]}.${m[2]}.${m[1]}`;
+    }
+    const d = new Date(str);
     return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU');
   }
   function currentMonthKey() {
@@ -556,6 +576,42 @@
     }
   }
 
+  // Кнопка «Отмена» под кнопкой сохранения — одинаковая во всех модалках
+  function cancelBtn(modalId) {
+    return `<button class="btn btn-outline" onclick="closeModal('${modalId}')"
+      style="background: transparent; color: var(--text); border: 1px solid var(--border); margin-top: 8px;">Отмена</button>`;
+  }
+
+  // Общее поведение модалки: закрытие по клику на затемнённый фон
+  // (только если клик пришёлся именно по фону, а не по внутренней карточке)
+  // и автофокус на первом поле ввода.
+  function setupModal(modal, focusId) {
+    // Закрываем только если И нажатие, И отпускание пришлись на сам фон:
+    // иначе выделение текста в поле с отпусканием мыши вне карточки
+    // (браузер шлёт click с target = фон) закрывало бы форму.
+    let downOnBackdrop = false;
+    modal.addEventListener('mousedown', (e) => { downOnBackdrop = (e.target === modal); });
+    modal.addEventListener('click', (e) => {
+      if (e.target !== modal || !downOnBackdrop) return;
+      downOnBackdrop = false;
+      // Клик по фону не должен молча стирать введённое: спрашиваем, только если
+      // пользователь изменил значения относительно тех, с которыми форма открылась.
+      const changed = Array.from(modal.querySelectorAll('input, textarea, select')).some(el => {
+        const initial = el.type === 'checkbox' ? el.defaultChecked : el.defaultValue;
+        const current = el.type === 'checkbox' ? el.checked : el.value;
+        return String(current) !== String(initial);
+      });
+      if (changed && !confirm('Закрыть форму? Введённые данные не сохранятся.')) return;
+      closeModal(modal.id);
+    });
+    // Фокус ставим асинхронно, после вставки в DOM: поле уже существует,
+    // а setTimeout (в отличие от requestAnimationFrame) срабатывает и в фоновой вкладке.
+    setTimeout(() => {
+      const el = focusId ? document.getElementById(focusId) : null;
+      if (el) { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } }
+    }, 0);
+  }
+
   // C1: переключение активного автомобиля
   async function setActiveVehicle(id) {
     if (!id) return;
@@ -614,10 +670,10 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый автомобиль</div>
-          <button onclick="closeModal('add-vehicle-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <input type="text" id="v-brand" class="input" placeholder="Марка (например, Toyota)">
         <input type="text" id="v-model" class="input" placeholder="Модель (например, Camry)">
@@ -626,9 +682,11 @@
         <input type="number" id="v-consumption" class="input" placeholder="Расход по БК, л/100 км (необязательно)" step="0.1">
         <input type="number" id="v-interval" class="input" placeholder="Интервал ТО (км), например 10000" value="10000">
         <button class="btn" onclick="saveVehicle()" id="save-vehicle-btn" style="margin-top: 8px;">Сохранить в облако</button>
+        ${cancelBtn('add-vehicle-modal')}
       </div>
     `;
     document.body.appendChild(modal);
+    setupModal(modal, 'v-brand');
   }
 
   async function openEditVehicle(id) {
@@ -657,10 +715,10 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Редактировать авто</div>
-          <button onclick="closeModal('edit-vehicle-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('edit-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${esc(v.brand || '')}">
         <input type="text" id="ev-model" class="input" placeholder="Модель" value="${esc(v.model || '')}">
@@ -670,10 +728,12 @@
         <input type="number" id="ev-interval" class="input" placeholder="Интервал ТО (км)" value="${v.service_interval === null || v.service_interval === undefined ? 10000 : esc(v.service_interval)}">
 
         <button class="btn" onclick="updateVehicle('${esc(id)}')" id="update-vehicle-btn" style="margin-top: 8px;">Сохранить изменения</button>
+        ${cancelBtn('edit-vehicle-modal')}
       </div>
     `;
     document.body.appendChild(modal);
     editVehicleModalOpening = false;
+    setupModal(modal, 'ev-brand');
   }
 
   async function updateVehicle(id) {
@@ -869,9 +929,9 @@
         <div class="card-label">${esc(v.year || 'Год не указан')}${isActive ? ' • активный' : ''}</div>
         <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${esc(v.brand || '')} ${esc(v.model || '')}</div>
         <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
-        <button class="btn" onclick="openEditVehicle('${esc(v.id)}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px;">Редактировать</button>
+        <button class="btn" onclick="openEditVehicle('${esc(v.id)}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px 14px;">Редактировать</button>
         <button onclick="deleteVehicle('${esc(v.id)}', '${jsStr((v.brand || '') + ' ' + (v.model || ''))}')"
-          style="background: var(--bg); color: var(--danger); border: 1px solid var(--border); font-size: 14px; padding: 10px; margin-top: 8px;">
+          style="background: var(--bg); color: var(--danger); border: 1px solid var(--border); font-size: 14px; padding: 10px 14px; margin-top: 8px; cursor: pointer;">
           Удалить
         </button>
       `;
@@ -971,25 +1031,23 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px;">
+      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Обновить пробег</div>
-          <button onclick="closeModal('update-mileage-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('update-mileage-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
         <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${fmtNum(v.current_mileage || 0)} км</p>
 
         <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${v.current_mileage === null || v.current_mileage === undefined ? '' : esc(v.current_mileage)}">
 
         <button class="btn" onclick="saveNewMileage('${esc(v.id)}')" id="save-mileage-btn" style="margin-top: 8px;">Сохранить</button>
+        ${cancelBtn('update-mileage-modal')}
       </div>
     `;
     document.body.appendChild(modal);
     mileageModalOpening = false;
 
-    setTimeout(() => {
-      const el = document.getElementById('new-mileage');
-      if (el) el.focus();
-    }, 100);
+    setupModal(modal, 'new-mileage');
   }
 
   async function saveNewMileage(id) {
@@ -1256,7 +1314,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая запись</div>
-          <button onclick="closeModal('add-maint-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-maint-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <input type="text" id="m-title" class="input" placeholder="Что сделали? (например, Замена масла)">
@@ -1272,12 +1330,14 @@
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
 
         <button class="btn" onclick="saveMaint()" id="save-maint-btn" style="margin-top: 8px;">Сохранить</button>
+        ${cancelBtn('add-maint-modal')}
         <button class="btn" onclick="openAddServiceType()" style="margin-top: 8px; background: transparent; color: var(--text); border: 1px solid var(--border);">+ Создать вид работ (например, Замена масла)</button>
       </div>
     `;
     document.body.appendChild(modal);
     maintFormVehicleId = formVehicleId;
     maintModalOpening = false;
+    setupModal(modal, 'm-title');
   }
 
   async function saveMaint() {
@@ -1385,14 +1445,16 @@
       <div style="background:var(--card); border-radius:24px 24px 0 0; padding:24px;">
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <div class="section-title" style="margin:0;">Новый вид работ</div>
-          <button onclick="closeModal('add-st-modal')" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
+          <button onclick="closeModal('add-st-modal')" class="modal-close" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
         </div>
         <input type="text" id="st-name" class="input" placeholder="Название (например, Замена масла)">
         <input type="number" id="st-interval" class="input" placeholder="Интервал (км), например 10000" value="10000">
         <button class="btn" onclick="saveServiceType()" id="save-st-btn" style="margin-top: 8px;">Сохранить вид работ</button>
+        ${cancelBtn('add-st-modal')}
       </div>
     `;
     document.body.appendChild(m);
+    setupModal(m, 'st-name');
   }
 
   async function saveServiceType() {
@@ -1545,7 +1607,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая заправка</div>
-          <button onclick="closeModal('add-refuel-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-refuel-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <input type="date" id="r-date" class="input">
@@ -1553,7 +1615,7 @@
         <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
         <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
 
-        <button type="button" onclick="document.getElementById('r-extra').style.display='block'; this.style.display='none';"
+        <button type="button" id="r-extra-toggle" onclick="toggleRefuelExtra()"
           style="background: none; border: none; color: var(--text-dim); font-size: 14px; padding: 8px 0 16px; cursor: pointer; font-family: inherit;">
           + Дополнительно (пробег, полный бак)
         </button>
@@ -1567,10 +1629,23 @@
         </div>
 
         <button class="btn" onclick="saveRefuel()" id="save-refuel-btn" style="margin-top: 8px;">Сохранить</button>
+        ${cancelBtn('add-refuel-modal')}
       </div>
     `;
     document.body.appendChild(modal);
     refuelFormVehicleId = activeVehicleId;
+    setupModal(modal, 'r-date');
+  }
+
+  // Реверсивная секция «Дополнительно»: кнопка остаётся на месте,
+  // меняется только текст и видимость полей.
+  function toggleRefuelExtra() {
+    const box = document.getElementById('r-extra');
+    const btn = document.getElementById('r-extra-toggle');
+    if (!box) return;
+    const willShow = box.style.display === 'none' || !box.style.display;
+    box.style.display = willShow ? 'block' : 'none';
+    if (btn) btn.textContent = willShow ? '− Скрыть дополнительно' : '+ Дополнительно (пробег, полный бак)';
   }
 
   async function saveRefuel() {
@@ -1599,8 +1674,7 @@
       return;
     }
 
-    // C1: привязка к активному автомобилю
-    // C1: привязка к активному автомобилю на момент открытия формы
+    // C1: привязка к автомобилю, выбранному в момент открытия формы
     const targetVehicleId = refuelFormVehicleId || activeVehicleId;
     if (!targetVehicleId) {
       showToast('Сначала добавь автомобиль');
@@ -1770,7 +1844,7 @@
       <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый расход</div>
-          <button onclick="closeModal('add-expense-modal')" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-expense-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
         <select id="e-category" class="input">
@@ -1787,10 +1861,12 @@
         <input type="date" id="e-date" class="input">
         <input type="text" id="e-comment" class="input" placeholder="Комментарий (необязательно)">
         <button class="btn" onclick="saveExpense()" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
+        ${cancelBtn('add-expense-modal')}
       </div>
     `;
     document.body.appendChild(modal);
     expenseFormVehicleId = activeVehicleId;
+    setupModal(modal, 'e-amount');
   }
 
   async function saveExpense() {
