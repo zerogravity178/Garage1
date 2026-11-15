@@ -109,6 +109,13 @@
     .btn-soft:active { background: rgba(255, 255, 255, 0.1); box-shadow: none; }
     .input {
       width: 100%;
+      /* Safari на iOS считает у input[type=date] внутреннюю ширину по
+         локализованной строке («16 нояб. 2026 г.») и игнорирует width: 100%.
+         min-width: 0 разрешает элементу сжиматься внутри flex/grid, а
+         box-sizing: border-box не даёт паддингам добавиться к 100%. */
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid var(--border);
       border-radius: var(--radius-input);
@@ -126,6 +133,12 @@
     select.input { appearance: none; -webkit-appearance: none; font-family: inherit; }
     select.input option { background: #14171A; color: var(--text); }
     textarea.input { resize: vertical; font-family: inherit; }
+    /* Дата и число: iOS рисует в них собственные контролы (спиннер,
+       нативный picker), которые не дают полю сжаться до ширины контейнера. */
+    input[type="date"], input[type="number"] { min-width: 0; max-width: 100%; box-sizing: border-box; }
+    /* Safari центрирует локализованную дату внутри поля — прижимаем влево,
+       иначе длинная строка «16 нояб. 2026 г.» выглядит вылезшей за край */
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
     /* ---- стеклянная карточка ---- */
     .card {
       background: var(--glass);
@@ -297,13 +310,14 @@
     }
     .hero-chip span { color: var(--text); }
     /* Чип фактического расхода: расхождение с БК больше 15% подсвечиваем
-       акцентом — это сигнал «данные пора перепроверить», а не тревога */
+       красным (тем же --danger, что у кнопки «Удалить») — это сигнал
+       «данные пора перепроверить», а не тревога */
     .hero-chip.is-accent {
-      color: var(--accent);
-      border-color: rgba(0, 229, 192, 0.35);
-      background: var(--accent-soft);
+      color: var(--danger);
+      border-color: rgba(255, 90, 95, 0.35);
+      background: rgba(255, 90, 95, 0.10);
     }
-    .hero-chip.is-accent span { color: var(--accent); }
+    .hero-chip.is-accent span { color: var(--danger); }
 
     /* ================= КОМПАКТНЫЕ СТАТИСТИКИ В РЯД ================= */
     .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -1277,7 +1291,52 @@
     }
   }
 
-  async function logout() {
+  // Выход спрашиваем модалкой в стиле приложения: случайный тап по «Выйти»
+  // в шапке раньше сразу закрывал сессию, и вернуться можно было только через
+  // повторный ввод пароля. Настоящий выход — в doLogout().
+  function logout() {
+    const modalId = 'confirm-logout-modal';
+    if (document.getElementById(modalId)) return;
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(9, 10, 12, 0.72); z-index: 1100;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      display: flex; flex-direction: column; justify-content: flex-end;
+    `;
+    modal.innerHTML = `
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div class="section-title" style="margin: 0;">Выйти из аккаунта?</div>
+          <button onclick="closeModal('${modalId}')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
+        </div>
+
+        <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 20px;">Придётся войти заново.</p>
+
+        <button class="btn btn-danger" id="logout-confirm-btn" onclick="doLogout()">Выйти</button>
+        ${cancelBtn(modalId)}
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Фокуса на поле здесь нет — ставим на кнопку «Отмена», чтобы Enter
+    // не выбивал из аккаунта по инерции.
+    setupModal(modal, null);
+    setTimeout(() => {
+      const cancel = modal.querySelector('.btn-outline');
+      if (cancel) { try { cancel.focus({ preventScroll: true }); } catch (_) { cancel.focus(); } }
+    }, 0);
+  }
+
+  async function doLogout() {
+    // блокировка ставится синхронно, до первого await: двойной тап
+    // по «Выйти» не должен запускать второй signOut
+    if (!acquireSave('logout')) return;
+    const btn = document.getElementById('logout-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Выходим...'; }
+
     try {
       const { error } = await db.auth.signOut();
       if (error) {
@@ -1289,7 +1348,17 @@
     } catch (e) {
       showToast('Не удалось выйти. Проверь интернет.');
       return;
+    } finally {
+      releaseSave('logout');
+      // Модалки может уже не быть, если выход прошёл и страница перезагружается.
+      // Берём элемент заново: кнопка из замыкания могла остаться отсоединённой.
+      const cur = document.getElementById('logout-confirm-btn');
+      if (cur) {
+        cur.disabled = false;
+        cur.textContent = 'Выйти';
+      }
     }
+
     window.location.reload();
   }
 
@@ -1795,7 +1864,7 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый автомобиль</div>
           <button onclick="closeModal('add-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
@@ -1847,7 +1916,7 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Редактировать авто</div>
           <button onclick="closeModal('edit-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
@@ -2159,7 +2228,7 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <div class="section-title" style="margin: 0;">Удалить автомобиль?</div>
           <button onclick="closeModal('${modalId}')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
@@ -2283,7 +2352,7 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Обновить пробег</div>
           <button onclick="closeModal('update-mileage-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -2709,7 +2778,7 @@
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая запись</div>
           <button onclick="closeModal('add-maint-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -3012,7 +3081,7 @@
     modal.id = 'add-refuel-modal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(9, 10, 12, 0.72); z-index: 1000; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; flex-direction: column; justify-content: flex-end;';
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая заправка</div>
           <button onclick="closeModal('add-refuel-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -3301,7 +3370,7 @@
     modal.id = 'add-expense-modal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(9, 10, 12, 0.72); z-index: 1000; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; flex-direction: column; justify-content: flex-end;';
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; min-width: 0; max-width: 100%; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый расход</div>
           <button onclick="closeModal('add-expense-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
