@@ -139,6 +139,46 @@
     /* Safari центрирует локализованную дату внутри поля — прижимаем влево,
        иначе длинная строка «16 нояб. 2026 г.» выглядит вылезшей за край */
     input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+    /* ---- поле даты в обёртке ---- */
+    /* Safari iOS измеряет input[type=date] по локализованной строке
+       («16 нояб. 2026 г.») и в части версий игнорирует width и max-width.
+       Обёртка с overflow: hidden гарантирует, что лишняя ширина обрежется
+       внутри неё, а не растянет модалку вместе с кнопками.
+       Отступ снизу переехал с поля на обёртку, иначе он удвоился бы. */
+    .input-date-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      border-radius: var(--radius-input);
+      margin-bottom: 12px;
+    }
+    .input-date-wrap .input { margin-bottom: 0; }
+    /* Запасной режим (USE_CUSTOM_DATE_TRIGGER = true): дату показывает обычная
+       кнопка, а нативный input лежит рядом невидимым 1×1. Ширину задаёт
+       кнопка, intrinsic-размер контрола сюда не попадает — вылезать нечему,
+       при этом сам пикер остаётся нативным (showPicker). */
+    .input-date-wrap .date-display {
+      display: block;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+    }
+    .input-date-wrap .date-native {
+      position: absolute;
+      top: 50%;
+      left: 12px;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      opacity: 0;
+      pointer-events: none;
+      /* меньше 16px iOS зумит страницу при фокусе на поле */
+      font-size: 16px;
+    }
     /* ---- стеклянная карточка ---- */
     .card {
       background: var(--glass);
@@ -1163,6 +1203,67 @@
   function inCurrentMonth(s) {
     if (!s) return false;
     return String(s).slice(0, 7) === currentMonthKey();
+  }
+
+  // ---------------------------------------------------------------
+  // ПОЛЕ ДАТЫ: два режима, переключаются одним флагом.
+  //
+  // Safari на iOS измеряет <input type="date"> по локализованной строке
+  // («16 нояб. 2026 г.») и в части версий игнорирует width/max-width —
+  // поле растягивает модалку и выдавливает кнопки за край экрана.
+  //
+  // false (по умолчанию) — шаг 3: нативный input в обёртке с overflow:hidden.
+  //   Лишняя ширина обрезается внутри обёртки, нативный пикер на месте.
+  // true — шаг 4: дату показывает обычная кнопка, а нативный input рядом
+  //   невидим (1×1). Intrinsic-ширина контрола вообще не участвует
+  //   в раскладке, поэтому вылезти нечему; пикер тот же (showPicker).
+  //
+  // Включать, если на реальном iPhone шаг 3 не помог: id полей и логика
+  // сохранения не меняются, достаточно поменять значение на true.
+  // ---------------------------------------------------------------
+  const USE_CUSTOM_DATE_TRIGGER = false;
+
+  function dateFieldHtml(id, value) {
+    const v = value || todayStr();
+    if (USE_CUSTOM_DATE_TRIGGER) {
+      return `
+        <div class="input-date-wrap">
+          <button type="button" class="input date-display" id="${id}-trigger"
+            onclick="pickDate('${id}')">${esc(formatDate(v))}</button>
+          <input type="date" id="${id}" class="date-native" value="${esc(v)}"
+            tabindex="-1" aria-hidden="true" onchange="syncDateDisplay('${id}')">
+        </div>`;
+    }
+    // Обычный режим: тот же id и та же логика, что были до правки
+    return `
+      <div class="input-date-wrap">
+        <input type="date" id="${id}" class="input" value="${esc(v)}">
+      </div>`;
+  }
+
+  // Открывает нативный пикер из запасного режима. showPicker появился
+  // не во всех версиях Safari — если его нет, остаётся обычный focus/click
+  // по скрытому input, который в iOS тоже открывает колесо даты.
+  function pickDate(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    try {
+      if (typeof el.showPicker === 'function') { el.showPicker(); return; }
+    } catch (_) { /* покажем фолбэк ниже */ }
+    try { el.focus(); el.click(); } catch (_) { /* ничего не поделать */ }
+  }
+
+  // Кнопка-плашка в запасном режиме должна показывать выбранную дату
+  function syncDateDisplay(id) {
+    const el = document.getElementById(id);
+    const btn = document.getElementById(id + '-trigger');
+    if (el && btn) btn.textContent = formatDate(el.value);
+  }
+
+  // Куда ставить автофокус: в запасном режиме фокусируем видимую кнопку,
+  // иначе setupModal фокусировал бы невидимый 1×1 input.
+  function dateFocusId(id) {
+    return USE_CUSTOM_DATE_TRIGGER ? id + '-trigger' : id;
   }
 
   // L2: перезапускаемый таймер тоста
@@ -2791,7 +2892,7 @@
           ${options}
         </select>
 
-        <input type="date" id="m-date" class="input" value="${todayStr()}">
+        ${dateFieldHtml('m-date', todayStr())}
         <input type="number" id="m-mileage" class="input" placeholder="Пробег (км)">
         <input type="number" id="m-cost" class="input" placeholder="Стоимость (₽)">
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
@@ -3087,7 +3188,7 @@
           <button onclick="closeModal('add-refuel-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
         </div>
 
-        <input type="date" id="r-date" class="input" value="${todayStr()}">
+        ${dateFieldHtml('r-date', todayStr())}
         <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
         <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
 
@@ -3109,7 +3210,7 @@
     `;
     document.body.appendChild(modal);
     refuelFormVehicleId = activeVehicleId;
-    setupModal(modal, 'r-date');
+    setupModal(modal, dateFocusId('r-date'));
   }
 
   async function saveRefuel() {
@@ -3387,7 +3488,7 @@
         </select>
 
         <input type="number" id="e-amount" class="input" placeholder="Сумма (₽)">
-        <input type="date" id="e-date" class="input" value="${todayStr()}">
+        ${dateFieldHtml('e-date', todayStr())}
         <input type="text" id="e-comment" class="input" placeholder="Комментарий (необязательно)">
         <button class="btn" onclick="saveExpense()" id="save-expense-btn" style="margin-top: 8px;">Сохранить</button>
         ${cancelBtn('add-expense-modal')}
