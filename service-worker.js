@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'my-garage-v3';
+const CACHE_VERSION = 'my-garage-v4';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const SHELL_URLS = ['./', './index.html', './manifest.json'];
