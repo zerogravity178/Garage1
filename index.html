@@ -870,9 +870,73 @@
         <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${esc(v.brand || '')} ${esc(v.model || '')}</div>
         <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
         <button class="btn" onclick="openEditVehicle('${esc(v.id)}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px;">Редактировать</button>
+        <button onclick="deleteVehicle('${esc(v.id)}', '${jsStr((v.brand || '') + ' ' + (v.model || ''))}')"
+          style="background: var(--bg); color: var(--danger); border: 1px solid var(--border); font-size: 14px; padding: 10px; margin-top: 8px;">
+          Удалить
+        </button>
       `;
       list.appendChild(card);
     });
+  }
+
+  // Значение для inline-обработчика (onclick="fn('...')").
+  // esc() здесь недостаточно: сущность &#39; декодируется ДО компиляции JS,
+  // и имя вида O'Brien ломает обработчик (SyntaxError). Поэтому апостроф
+  // экранируется как JS-escape, а амперсанд/кавычка — как HTML-сущности.
+  const jsStr = (s) => String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
+
+  // Полное удаление автомобиля вместе со всей историей.
+  // ON DELETE CASCADE в БД не используется — удаляем явно, по порядку.
+  async function deleteVehicle(id, name) {
+    if (!confirm(`Удалить автомобиль «${name}»?\n\nВместе с ним будут удалены ВСЕ записи:\n• обслуживание\n• заправки\n• расходы\n\nВосстановить будет невозможно.`)) return;
+    if (!confirm(`Точно удалить «${name}» и всю историю?\n\nНажми ОК для подтверждения.`)) return;
+
+    // блокировка ставится синхронно, до первого await
+    if (!acquireSave('deleteVehicle')) return;
+
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+
+      const targets = ['maintenance', 'refuels', 'expenses'];
+      for (const table of targets) {
+        const { error } = await db.from(table).delete().eq('vehicle_id', id).eq('user_id', userId);
+        if (error) {
+          showToast('Ошибка: ' + error.message);
+          return; // прерываем: не удаляем авто, пока не убрана история
+        }
+      }
+
+      const { error: vError } = await db.from('vehicles').delete().eq('id', id).eq('user_id', userId);
+      if (vError) {
+        showToast('Ошибка: ' + vError.message);
+        return;
+      }
+
+      // если удалили активную машину — сбрасываем выбор,
+      // loadVehicles ниже сам возьмёт первую из оставшихся
+      if (id === activeVehicleId) {
+        activeVehicleId = null;
+        localStorage.removeItem('my_garage_active_vehicle');
+      }
+
+      showToast('Автомобиль удалён');
+      await loadVehicles();
+      loadHome();
+      loadMaint();
+      loadExpenses();
+      loadRefuels();
+    } catch (e) {
+      showToast('Ошибка сети: ' + e.message);
+    } finally {
+      releaseSave('deleteVehicle');
+    }
   }
 
   async function openUpdateMileage() {
