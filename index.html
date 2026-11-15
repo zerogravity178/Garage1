@@ -296,6 +296,14 @@
       padding: 7px 12px;
     }
     .hero-chip span { color: var(--text); }
+    /* Чип фактического расхода: расхождение с БК больше 15% подсвечиваем
+       акцентом — это сигнал «данные пора перепроверить», а не тревога */
+    .hero-chip.is-accent {
+      color: var(--accent);
+      border-color: rgba(0, 229, 192, 0.35);
+      background: var(--accent-soft);
+    }
+    .hero-chip.is-accent span { color: var(--accent); }
 
     /* ================= КОМПАКТНЫЕ СТАТИСТИКИ В РЯД ================= */
     .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -607,6 +615,92 @@
       line-height: 1.2;
     }
 
+    /* ================= СВОДКА РАСХОДОВ ПО КАТЕГОРИЯМ ================= */
+    .exp-summary { border: 1px solid rgba(0, 229, 192, 0.28); }
+    .exp-sum-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    /* Переключатель «Месяц / Всё время» — узкие пилюли, чтобы обе влезали
+       в строку даже на 320 px вместе с заголовком */
+    .exp-period {
+      display: flex;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px;
+      flex: 0 0 auto;
+    }
+    .exp-period button {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    .exp-period button.is-active {
+      color: #061412;
+      background: var(--accent);
+    }
+    .exp-sum-value {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--accent);
+      line-height: 1.2;
+      margin-bottom: 16px;
+      overflow-wrap: anywhere;
+    }
+    .exp-row { margin-bottom: 14px; }
+    .exp-row:last-child { margin-bottom: 0; }
+    .exp-row-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+    .exp-row-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
+    .exp-row-sum {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    /* Полоска — настоящий SVG (rect со скруглением внутри viewBox 100×6):
+       ширина заливки задаётся в процентах от самой большой категории,
+       поэтому max = 100%. viewBox делает масштаб независимым от ширины
+       карточки, а preserveAspectRatio="none" не даёт шкале плыть. */
+    .exp-bar {
+      display: block;
+      width: 100%;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+    }
+    .exp-bar .track { fill: rgba(255, 255, 255, 0.06); }
+    .exp-bar .fill {
+      fill: var(--accent);
+      transition: width 0.25s ease;
+    }
+
     /* ================= FAB: КОНТЕКСТНАЯ КНОПКА «+» ================= */
     .fab {
       position: fixed;
@@ -806,6 +900,7 @@
       <div class="hero-body">
         <div class="hero-chips">
           <span class="hero-chip">Расход: <span id="home-consumption">— л/100 км</span></span>
+          <span class="hero-chip" id="home-fact-chip" style="display: none;">Факт: <span id="home-fact">—</span></span>
         </div>
         <button class="btn btn-soft" onclick="openUpdateMileage()">Обновить пробег</button>
       </div>
@@ -869,6 +964,8 @@
     <div class="row-between">
       <div class="section-title">Расходы</div>
     </div>
+
+    <div class="card exp-summary" id="expenses-summary" style="display: none;"></div>
 
     <div id="expenses-list">
       <div class="empty" id="expenses-empty">Пока пусто.<br>Нажми «+», чтобы записать трату.</div>
@@ -966,6 +1063,66 @@
   };
   const fmtNum = (v) => num(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
   const fmtMoney = (v) => fmtNum(v) + ' ₽';
+
+  // Фактический расход по методу «полный бак → полный бак».
+  // Считаем по всем заправкам активного авто: литры между двумя отсечками
+  // делим на пройденные километры. Первая отсечка пары в литры не входит —
+  // её топливо израсходовано на предыдущем отрезке, иначе расход завышается.
+  // Если отрезков несколько, берём средневзвешенное по пробегу
+  // (Σлитров / Σкм), а не среднее средних: длинный отрезок даёт более
+  // достоверный результат и должен весить больше.
+  function calcActualConsumption(refuels) {
+    const rows = (refuels || [])
+      .filter(Boolean)
+      .map(r => ({
+        date: String(r.date || ''),
+        createdAt: String(r.created_at || ''),
+        mileage: (r.mileage === null || r.mileage === undefined || r.mileage === '')
+          ? null
+          : num(r.mileage, null),
+        liters: num(r.liters, 0),
+        isFull: r.is_full_tank === true
+      }))
+      // При равных датах порядок задаёт created_at: две заправки в один день
+      // должны идти в том порядке, в котором их внесли
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+        return 0;
+      });
+
+    let totalLiters = 0;
+    let totalKm = 0;
+    let pairsCount = 0;
+    let prevIdx = -1; // последняя «отсечка» — полный бак с известным пробегом
+
+    for (let i = 0; i < rows.length; i++) {
+      const cur = rows[i];
+      if (!cur.isFull || cur.mileage === null) continue;
+
+      if (prevIdx !== -1) {
+        const distance = cur.mileage - rows[prevIdx].mileage;
+        // Одометр назад или не изменился — данные битые, отрезок пропускаем,
+        // но текущую запись берём как новую отсечку
+        if (distance > 0) {
+          let segmentLiters = 0;
+          for (let k = prevIdx + 1; k <= i; k++) segmentLiters += rows[k].liters;
+          totalLiters += segmentLiters;
+          totalKm += distance;
+          pairsCount++;
+        }
+      }
+      prevIdx = i;
+    }
+
+    // Нет отрезков или нулевой объём — показываем «нет данных», а не 0,0:
+    // ложный ноль читается как «машина не ест бензин»
+    if (!pairsCount || totalKm <= 0 || totalLiters <= 0) {
+      return { value: null, pairsCount };
+    }
+
+    return { value: (totalLiters / totalKm) * 100, pairsCount };
+  }
 
   // Даты: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса.
   // Возвращаем '—' для null/undefined/пустых и для несуществующих дат
@@ -1321,6 +1478,12 @@
     vehiclesCount = 0;
     renderHeaderVehicle([]);
     updateFab();
+    // фактический расход и сводка расходов чужого аккаунта не должны
+    // мигать на экране входа
+    hideFactChip();
+    expensesSummaryPeriod = 'month';
+    expensesCache = [];
+    hideExpensesSummary();
   }
 
   // Единая точка закрытия модалок: удаляет элемент и сбрасывает состояние формы,
@@ -1392,6 +1555,11 @@
     if (sel) sel.value = id;
     // перерисовываем карточки гаража, чтобы метка «активный» была на нужной машине
     await loadVehicles();
+    // период сводки сбрасываем: «всё время» по чужой машине — не то,
+    // что человек ожидает увидеть после переключения
+    expensesSummaryPeriod = 'month';
+    expensesCache = [];
+    hideExpensesSummary();
     loadHome();
     loadMaint();
     loadExpenses();
@@ -2266,6 +2434,44 @@
     metaEl.textContent = parts.join(' • ');
   }
 
+  // Чип фактического расхода прячем целиком, когда считать нечего:
+  // пустая плашка «Факт: —» выглядит как сломанный интерфейс.
+  function hideFactChip() {
+    const chip = document.getElementById('home-fact-chip');
+    const val = document.getElementById('home-fact');
+    if (val) val.textContent = '—';
+    if (chip) {
+      chip.style.display = 'none';
+      chip.classList.remove('is-accent');
+    }
+  }
+
+  // Показываем «Факт: X,X л/100 км». Акцентом подсвечиваем случай, когда
+  // реальный расход расходится с паспортным/БК больше чем на 15%: это
+  // повод перепроверить данные, а не «поломка». Берём только те случаи,
+  // когда БК задан — иначе сравнивать не с чем.
+  function renderFactChip(actual, boardConsumption) {
+    const chip = document.getElementById('home-fact-chip');
+    const val = document.getElementById('home-fact');
+    if (!chip || !val) return;
+
+    if (actual.value === null) {
+      val.textContent = 'нет данных';
+      chip.style.display = 'inline-flex';
+      chip.classList.remove('is-accent');
+      return;
+    }
+
+    // Ровно один знак после запятой — как в спецификации: 9,6 а не 9,63
+    const rounded = Math.round(actual.value * 10) / 10;
+    val.textContent = rounded.toFixed(1).replace('.', ',') + ' л/100 км';
+    chip.style.display = 'inline-flex';
+
+    const diffTooBig = boardConsumption !== null && boardConsumption > 0 &&
+      Math.abs(actual.value - boardConsumption) / boardConsumption > 0.15;
+    chip.classList.toggle('is-accent', diffTooBig);
+  }
+
   async function loadHome() {
     const nameEl = document.getElementById('home-car-name');
     const mileageEl = document.getElementById('home-car-mileage');
@@ -2278,6 +2484,7 @@
       renderHeroPhoto('');
       renderHeroYear(null);
       renderLastMaint([]);
+      hideFactChip();
       nameEl.textContent = lastVehiclesLoadError ? 'Не удалось загрузить' : 'Ещё не добавлен';
       mileageEl.textContent = lastVehiclesLoadError
         ? 'Проверь соединение и обнови страницу'
@@ -2296,6 +2503,7 @@
       renderHeroPhoto('');
       renderHeroYear(null);
       renderLastMaint([]);
+      hideFactChip();
       nameEl.textContent = 'Не удалось загрузить';
       mileageEl.textContent = 'Проверь соединение и обнови страницу';
       consEl.textContent = '—';
@@ -2309,6 +2517,7 @@
       renderHeroPhoto('');
       renderHeroYear(null);
       renderLastMaint([]);
+      hideFactChip();
       nameEl.textContent = 'Ещё не добавлен';
       mileageEl.textContent = 'Перейди в «Гараж» → «Добавить авто»';
       consEl.textContent = 'не указан';
@@ -2371,6 +2580,15 @@
         });
         fuelEl.textContent = fmtMoney(fuelTotal);
       }
+    }
+
+    // Фактический расход считаем по тем же refuels, что уже загружены выше —
+    // второй запрос к таблице не нужен. При ошибке запроса чип скрываем:
+    // «нет данных» здесь означало бы «заправок мало», а не «сеть отвалилась».
+    if (refuelRes.error) {
+      hideFactChip();
+    } else {
+      renderFactChip(calcActualConsumption(refuelRes.data || []), consumption);
     }
 
     // Блок «Последнее ТО»
@@ -2803,20 +3021,18 @@
         <input type="date" id="r-date" class="input" value="${todayStr()}">
         <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
         <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
-        <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
 
-        <button type="button" id="r-extra-toggle" onclick="toggleRefuelExtra()"
-          style="background: none; border: none; color: var(--text-dim); font-size: 14px; padding: 8px 0 16px; cursor: pointer; font-family: inherit;">
-          + Дополнительно (пробег, полный бак)
-        </button>
-
-        <div id="r-extra" style="display: none;">
-          <input type="number" id="r-mileage" class="input" placeholder="Пробег (км, необязательно)">
-          <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
-            <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
-            <span style="font-size: 15px;">Полный бак</span>
-          </label>
+        <input type="number" id="r-mileage" class="input" placeholder="Пробег (км) — обязательное поле" step="1">
+        <div style="font-size: 12px; color: var(--text-dim); margin: -6px 0 12px 4px;">
+          Нужен для расчёта расхода и напоминаний о ТО
         </div>
+
+        <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
+          <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
+          <span style="font-size: 15px;">Полный бак</span>
+        </label>
+
+        <input type="text" id="r-comment" class="input" placeholder="Комментарий (необязательно)">
 
         <button class="btn" onclick="saveRefuel()" id="save-refuel-btn" style="margin-top: 8px;">Сохранить</button>
         ${cancelBtn('add-refuel-modal')}
@@ -2827,24 +3043,13 @@
     setupModal(modal, 'r-date');
   }
 
-  // Реверсивная секция «Дополнительно»: кнопка остаётся на месте,
-  // меняется только текст и видимость полей.
-  function toggleRefuelExtra() {
-    const box = document.getElementById('r-extra');
-    const btn = document.getElementById('r-extra-toggle');
-    if (!box) return;
-    const willShow = box.style.display === 'none' || !box.style.display;
-    box.style.display = willShow ? 'block' : 'none';
-    if (btn) btn.textContent = willShow ? '− Скрыть дополнительно' : '+ Дополнительно (пробег, полный бак)';
-  }
-
   async function saveRefuel() {
     const date = document.getElementById('r-date').value;
     const liters = document.getElementById('r-liters').value;
     const total = document.getElementById('r-total').value;
     const comment = document.getElementById('r-comment').value.trim();
     const mileageEl = document.getElementById('r-mileage');
-    const mileage = mileageEl ? mileageEl.value : '';
+    const mileage = mileageEl ? mileageEl.value.trim() : '';
     const fullEl = document.getElementById('r-full');
     const isFull = fullEl ? fullEl.checked : false;
 
@@ -2864,6 +3069,20 @@
       return;
     }
 
+    // Пробег обязателен: по нему считаются фактический расход и напоминания
+    // о ТО. Без него заправка превращается в мёртвую строку в истории.
+    if (mileage === '') {
+      showToast('Впиши пробег — он нужен для расчёта расхода и ТО');
+      return;
+    }
+
+    const mileageNum = num(mileage, NaN);
+    if (!Number.isFinite(mileageNum) || mileageNum <= 0) {
+      showToast('Пробег должен быть положительным числом');
+      return;
+    }
+    const mileageInt = Math.round(mileageNum);
+
     // C1: привязка к автомобилю, выбранному в момент открытия формы
     const targetVehicleId = refuelFormVehicleId || activeVehicleId;
     if (!targetVehicleId) {
@@ -2879,6 +3098,38 @@
       return;
     }
 
+    // Пробег не может идти назад: иначе фактический расход по бакам
+    // посчитается по отрицательному отрезку. Проверку делаем по последней
+    // заправке этого авто, а не активного: форму могли открыть на одной
+    // машине и сохранить после переключения на другую.
+    // Сеть может отвалиться — тогда проверку просто пропускаем, чтобы
+    // не потерять важную запись.
+    try {
+      const { data: lastRows, error: lastErr } = await db
+        .from('refuels')
+        .select('mileage, date')
+        .eq('vehicle_id', targetVehicleId)
+        .not('mileage', 'is', null)
+        .order('date', { ascending: false })
+        .limit(1);
+
+      if (lastErr) {
+        console.error('Не удалось проверить прошлый пробег:', lastErr);
+      } else {
+        const last = lastRows && lastRows[0];
+        const lastMileage = last && last.mileage !== null && last.mileage !== undefined
+          ? num(last.mileage, null)
+          : null;
+        if (lastMileage !== null && mileageInt < lastMileage) {
+          releaseSave('refuel');
+          showToast('Пробег не может быть меньше, чем при прошлой заправке (' + fmtNum(lastMileage) + ' км)');
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('Не удалось проверить прошлый пробег:', e);
+    }
+
     const btn = document.getElementById('save-refuel-btn');
     btn.textContent = 'Сохраняем...';
     btn.disabled = true;
@@ -2890,7 +3141,7 @@
         date: date,
         liters: litersNum,
         total_cost: totalNum,
-        mileage: mileage === '' ? null : parseInt(mileage, 10),
+        mileage: mileageInt,
         is_full_tank: isFull,
         comment: comment
       });
@@ -2902,17 +3153,14 @@
 
       // Пробег подтягиваем отдельно: сбой здесь не должен выглядеть как
       // неудачное сохранение заправки (иначе пользователь нажмёт ещё раз и создаст дубль).
-      if (mileage !== '') {
-        try {
-          const newMileage = parseInt(mileage, 10);
-          const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', targetVehicleId).maybeSingle();
-          const current = vData && vData.current_mileage ? Number(vData.current_mileage) : 0;
-          if (newMileage > current) {
-            await db.from('vehicles').update({ current_mileage: newMileage }).eq('id', targetVehicleId).eq('user_id', userId);
-          }
-        } catch (e) {
-          console.error('Не удалось обновить пробег:', e);
+      try {
+        const { data: vData } = await db.from('vehicles').select('current_mileage').eq('id', targetVehicleId).maybeSingle();
+        const current = vData && vData.current_mileage ? Number(vData.current_mileage) : 0;
+        if (mileageInt > current) {
+          await db.from('vehicles').update({ current_mileage: mileageInt }).eq('id', targetVehicleId).eq('user_id', userId);
         }
+      } catch (e) {
+        console.error('Не удалось обновить пробег:', e);
       }
 
       closeModal('add-refuel-modal');
@@ -3146,6 +3394,162 @@
     }
   }
 
+  // ---------- Сводка расходов по категориям ----------
+  // Загруженные записи держим в памяти: переключение «Месяц / Всё время»
+  // не должно ходить в базу — это просто другой срез тех же данных.
+  let expensesSummaryPeriod = 'month';
+  let expensesCache = [];
+
+  // Скрываем карточку целиком, когда показывать нечего: «0 ₽» и пустые
+  // полоски читаются как «расходов нет вообще», хотя их может не быть
+  // только в этом месяце.
+  function hideExpensesSummary() {
+    const box = document.getElementById('expenses-summary');
+    if (!box) return;
+    box.style.display = 'none';
+    box.innerHTML = '';
+  }
+
+  // Полоска — SVG 100×6 с preserveAspectRatio="none": ширина заливки равна
+  // проценту от максимальной категории, поэтому самая большая всегда 100%.
+  function buildBarSvg(percent) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'exp-bar');
+    svg.setAttribute('viewBox', '0 0 100 6');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('aria-hidden', 'true');
+
+    const track = document.createElementNS(NS, 'rect');
+    track.setAttribute('class', 'track');
+    track.setAttribute('x', '0');
+    track.setAttribute('y', '0');
+    track.setAttribute('width', '100');
+    track.setAttribute('height', '6');
+    track.setAttribute('rx', '3');
+    svg.appendChild(track);
+
+    const fill = document.createElementNS(NS, 'rect');
+    fill.setAttribute('class', 'fill');
+    fill.setAttribute('x', '0');
+    fill.setAttribute('y', '0');
+    fill.setAttribute('width', String(Math.max(percent, 1.5)));
+    fill.setAttribute('height', '6');
+    fill.setAttribute('rx', '3');
+    svg.appendChild(fill);
+
+    return svg;
+  }
+
+  // Группировка по категории + топ-4 и «Прочее».
+  // «Прочее» — это именно свёрнутые остатки, а не настоящая категория
+  // «Прочее» из формы: они могут встретиться вместе, и тогда суммы
+  // складываются в одну строку, что для пользователя и есть правда.
+  function buildCategoryBuckets(records) {
+    const map = new Map();
+    (records || []).forEach(r => {
+      const raw = r.category;
+      const name = (raw === null || raw === undefined || String(raw).trim() === '')
+        ? 'Без категории'
+        : String(raw);
+      const amount = num(r.amount, 0);
+      map.set(name, (map.get(name) || 0) + amount);
+    });
+
+    const sorted = Array.from(map.entries())
+      .map(([name, amount]) => ({ name, amount }))
+      .filter(x => x.amount > 0)
+      .sort((a, b) => b.amount - a.amount);
+
+    const total = sorted.reduce((s, x) => s + x.amount, 0);
+    if (!sorted.length) return { rows: [], total: 0 };
+
+    let rows = sorted;
+    if (sorted.length > 4) {
+      const top = sorted.slice(0, 4);
+      const rest = sorted.slice(4);
+      const restSum = rest.reduce((s, x) => s + x.amount, 0);
+      // Если «Прочее» уже есть среди топ-4, добавляем остатки к нему,
+      // иначе получалось бы две строки с одинаковым названием
+      const existing = top.find(x => x.name === 'Прочее');
+      if (existing) {
+        existing.amount += restSum;
+      } else {
+        top.push({ name: 'Прочее', amount: restSum });
+      }
+      rows = top;
+    }
+
+    return { rows, total };
+  }
+
+  function renderExpensesSummary(records) {
+    const box = document.getElementById('expenses-summary');
+    if (!box) return;
+
+    const all = records || [];
+    expensesCache = all;
+
+    const scoped = expensesSummaryPeriod === 'month'
+      ? all.filter(r => inCurrentMonth(r.date))
+      : all;
+
+    const { rows, total } = buildCategoryBuckets(scoped);
+    if (!rows.length || total <= 0) {
+      hideExpensesSummary();
+      return;
+    }
+
+    const maxAmount = rows.reduce((m, x) => Math.max(m, x.amount), 0);
+
+    box.innerHTML = `
+      <div class="exp-sum-head">
+        <div class="card-label" style="margin: 0;">Расходы по категориям</div>
+        <div class="exp-period" role="group" aria-label="Период сводки">
+          <button type="button" class="${expensesSummaryPeriod === 'month' ? 'is-active' : ''}"
+            onclick="setExpensesPeriod('month')">Месяц</button>
+          <button type="button" class="${expensesSummaryPeriod === 'all' ? 'is-active' : ''}"
+            onclick="setExpensesPeriod('all')">Всё время</button>
+        </div>
+      </div>
+      <div class="exp-sum-value">${fmtMoney(total)}</div>
+    `;
+
+    rows.forEach(row => {
+      const percent = maxAmount > 0 ? (row.amount / maxAmount) * 100 : 0;
+
+      const line = document.createElement('div');
+      line.className = 'exp-row';
+
+      const head = document.createElement('div');
+      head.className = 'exp-row-head';
+
+      const name = document.createElement('div');
+      name.className = 'exp-row-name';
+      name.textContent = row.name; // esc не нужен: textContent не парсит HTML
+
+      const sum = document.createElement('div');
+      sum.className = 'exp-row-sum';
+      sum.textContent = fmtMoney(row.amount);
+
+      head.appendChild(name);
+      head.appendChild(sum);
+      line.appendChild(head);
+      line.appendChild(buildBarSvg(percent));
+      box.appendChild(line);
+    });
+
+    box.style.display = 'block';
+  }
+
+  // Переключение периода: только перерисовка, без запроса к базе
+  function setExpensesPeriod(period) {
+    const next = period === 'all' ? 'all' : 'month';
+    if (next === expensesSummaryPeriod) return;
+    expensesSummaryPeriod = next;
+    renderExpensesSummary(expensesCache);
+  }
+
   async function loadExpenses() {
     const list = document.getElementById('expenses-list');
     const empty = document.getElementById('expenses-empty');
@@ -3155,6 +3559,7 @@
     });
 
     if (!activeVehicleId) {
+      hideExpensesSummary();
       empty.innerHTML = lastVehiclesLoadError
         ? 'Не удалось загрузить. Проверь соединение.'
         : 'Сначала добавь автомобиль в гараже.';
@@ -3171,10 +3576,14 @@
 
     if (error) {
       console.error(error);
+      hideExpensesSummary();
       empty.innerHTML = 'Не удалось загрузить расходы.<br>Проверь соединение.';
       empty.style.display = 'block';
       return;
     }
+
+    // Сводка рисуется до списка — она стоит над ним
+    renderExpensesSummary(records || []);
 
     if (!records || records.length === 0) {
       empty.innerHTML = 'Пока пусто.<br>Нажми «+» внизу справа, чтобы записать трату.';
