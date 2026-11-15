@@ -3,9 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0E0F11">
+  <meta name="theme-color" content="#090A0C">
   <title>MY GARAGE</title>
   <link rel="manifest" href="manifest.json">
+  <!-- Manrope: 400 / 500 / 600 / 700. Если сети нет — сработает системный шрифт из fallback -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -13,24 +17,52 @@
        смешивает системный Arial с основным шрифтом */
     button, input, select, textarea { font-family: inherit; }
     :root {
-      --bg: #0E0F11;
-      --card: #17191C;
-      --border: #24272B;
+      --bg: #090A0C;
+      --card: #14171A;              /* непрозрачная поверхность: шторки модалок, кнопки */
+      --card-solid: #14171A;
+      --glass: rgba(25, 28, 32, 0.7);
+      --glass-strong: rgba(25, 28, 32, 0.88);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.14);
       --accent: #00E5C0;
       --accent-dim: #00B89A;
+      --accent-soft: rgba(0, 229, 192, 0.12);
       --text: #F2F4F5;
       --text-dim: #8A9099;
       --danger: #FF5A5F;
+      --warn: #FFC107;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.28);
+      --radius-card: 24px;
+      --radius-btn: 16px;
+      --radius-input: 16px;
     }
+    html { background: var(--bg); }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding-bottom: 80px;
+      padding-bottom: 96px;
       -webkit-tap-highlight-color: transparent;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      letter-spacing: -0.01em;
     }
-    .screen { display: none; padding: 20px; }
+    /* Мягкое свечение сверху — «дорогая» глубина фона, не мешает контенту */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -240px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 720px;
+      height: 480px;
+      background: radial-gradient(closest-side, rgba(0, 229, 192, 0.10), rgba(0, 229, 192, 0));
+      pointer-events: none;
+      z-index: 0;
+    }
+    .screen { display: none; padding: 20px; position: relative; z-index: 1; }
     .screen.active { display: block; }
     .header {
       display: flex;
@@ -39,36 +71,47 @@
       margin-bottom: 24px;
       padding-top: 8px;
     }
-    .logo { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo { font-size: 24px; font-weight: 700; letter-spacing: -0.6px; }
     .logo span { color: var(--accent); }
     .btn {
       background: var(--accent);
-      color: #0E0F11;
+      color: #061412;
       border: none;
       padding: 16px 24px;
-      border-radius: 14px;
+      border-radius: var(--radius-btn);
       font-size: 17px;
-      font-weight: 600;
+      font-weight: 700;
       width: 100%;
       cursor: pointer;
       font-family: inherit;
-      transition: background 0.15s;
+      letter-spacing: -0.01em;
+      box-shadow: 0 6px 20px rgba(0, 229, 192, 0.22);
+      transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
     }
-    .btn:active { background: var(--accent-dim); }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn:active { background: var(--accent-dim); transform: scale(0.985); box-shadow: 0 3px 12px rgba(0, 229, 192, 0.18); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
     /* Крестики «×» в шапке модалок — кнопки без класса .btn, курсор им нужен отдельно */
     .modal-close { cursor: pointer; }
     .btn-outline {
       background: transparent;
       color: var(--text);
-      border: 1px solid var(--border);
+      border: 1px solid var(--border-strong);
+      box-shadow: none;
     }
-    .btn-outline:active { background: var(--card); }
+    .btn-outline:active { background: rgba(255, 255, 255, 0.05); box-shadow: none; }
+    /* Второстепенная кнопка: «Обновить пробег», «Редактировать», «Удалить» */
+    .btn-soft {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+    .btn-soft:active { background: rgba(255, 255, 255, 0.1); box-shadow: none; }
     .input {
       width: 100%;
-      background: var(--card);
+      background: rgba(255, 255, 255, 0.04);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: var(--radius-input);
       padding: 16px;
       font-size: 17px;
       color: var(--text);
@@ -76,34 +119,55 @@
       outline: none;
       /* без этого поля ввода рисуются системным Arial вместо шрифта интерфейса */
       font-family: inherit;
+      transition: border-color 0.15s, background 0.15s;
     }
-    .input:focus { border-color: var(--accent); }
+    .input::placeholder { color: #6E747C; }
+    .input:focus { border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
     select.input { appearance: none; -webkit-appearance: none; font-family: inherit; }
+    select.input option { background: #14171A; color: var(--text); }
     textarea.input { resize: vertical; font-family: inherit; }
+    /* ---- стеклянная карточка ---- */
     .card {
-      background: var(--card);
+      background: var(--glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border: 1px solid var(--border);
-      border-radius: 18px;
+      border-radius: var(--radius-card);
       padding: 20px;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
     }
-    .card-label { font-size: 13px; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .card-value { font-size: 28px; font-weight: 700; }
+    .card-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      font-weight: 600;
+    }
+    .card-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
     .card-value.accent { color: var(--accent); }
     .auth-box { max-width: 400px; margin: 60px auto 0; text-align: center; }
-    .auth-box h1 { font-size: 32px; margin-bottom: 8px; }
+    .auth-box h1 { font-size: 32px; margin-bottom: 8px; letter-spacing: -0.03em; }
     .auth-box p { color: var(--text-dim); margin-bottom: 32px; font-size: 15px; line-height: 1.5; }
     .nav {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: var(--card);
+      background: var(--glass-strong);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-top: 1px solid var(--border);
       display: flex;
       justify-content: space-around;
       padding: 10px 0 24px;
       z-index: 100;
+      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+    }
+    /* на iPhone снизу «домашняя полоса» — отступаем на safe-area */
+    @supports (padding: max(0px)) {
+      .nav { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
     }
     .nav-item {
       display: flex;
@@ -111,16 +175,18 @@
       align-items: center;
       gap: 4px;
       font-size: 11px;
+      font-weight: 600;
       color: var(--text-dim);
       cursor: pointer;
       padding: 4px 12px;
       border: none;
       background: none;
       font-family: inherit;
+      transition: color 0.15s;
     }
     .nav-item.active { color: var(--accent); }
     .nav-icon { font-size: 22px; line-height: 1; }
-    .section-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+    .section-title { font-size: 20px; font-weight: 700; margin-bottom: 16px; letter-spacing: -0.02em; }
     .empty { color: var(--text-dim); text-align: center; padding: 40px 20px; font-size: 15px; line-height: 1.6; }
     .toast {
       position: fixed;
@@ -128,17 +194,293 @@
       left: 20px;
       right: 20px;
       background: var(--accent);
-      color: #0E0F11;
+      color: #061412;
       padding: 14px 18px;
-      border-radius: 12px;
-      font-weight: 600;
+      border-radius: 14px;
+      font-weight: 700;
       font-size: 14px;
       z-index: 200;
       display: none;
       text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 229, 192, 0.25);
     }
     .toast.show { display: block; }
-    .logout { background: none; border: none; color: var(--text-dim); font-size: 14px; cursor: pointer; font-family: inherit; }
+    .logout {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 8px 14px;
+      border-radius: 12px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .logout:active { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+
+    /* ================= HERO-КАРТОЧКА АВТО НА ГЛАВНОЙ ================= */
+    .hero {
+      position: relative;
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      background: var(--glass);
+    }
+    .hero-media { position: relative; height: 220px; background: #0D1013; }
+    .hero-photo { width: 100%; height: 220px; object-fit: cover; display: block; }
+    /* Плейсхолдер, когда фото нет: градиент от акцента к тёмному + силуэт */
+    .hero-placeholder {
+      width: 100%;
+      height: 220px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(120% 120% at 15% 10%, rgba(0, 229, 192, 0.30), rgba(0, 229, 192, 0) 60%),
+        linear-gradient(160deg, #10221F 0%, #0B0D10 55%, #090A0C 100%);
+      color: rgba(0, 229, 192, 0.55);
+      font-size: 64px;
+      line-height: 1;
+      user-select: none;
+    }
+    /* Затемнение снизу, чтобы текст поверх фото читался */
+    .hero-fade {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 150px;
+      background: linear-gradient(to top, rgba(9, 10, 12, 0.96) 0%, rgba(9, 10, 12, 0.75) 45%, rgba(9, 10, 12, 0) 100%);
+      pointer-events: none;
+    }
+    .hero-info { position: absolute; left: 20px; right: 20px; bottom: 16px; }
+    .hero-name {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      margin-bottom: 4px;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+      line-height: 1.15;
+      /* длинное название («Mercedes-Benz GLE 400 d 4MATIC AMG Line…»)
+         не должно вылезать за карточку и ломать вёрстку */
+      overflow-wrap: anywhere;
+    }
+    .hero-mileage { font-size: 13px; color: rgba(242, 244, 245, 0.78); font-weight: 500; overflow-wrap: anywhere; }
+    .hero-badge {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: rgba(9, 10, 12, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+    .hero-body { padding: 16px 20px 20px; }
+    .hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .hero-chip {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 12px;
+    }
+    .hero-chip span { color: var(--text); }
+
+    /* ================= КОМПАКТНЫЕ СТАТИСТИКИ В РЯД ================= */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .stat {
+      background: var(--glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 18px;
+      box-shadow: var(--shadow);
+      min-height: 96px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+    }
+    .stat-value { font-size: clamp(17px, 4.6vw, 22px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; }
+    .stat-value.accent { color: var(--accent); }
+    .stat-note { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+    /* ================= БЛОК «ПОСЛЕДНЕЕ ТО» ================= */
+    .last-maint { display: flex; align-items: flex-start; gap: 14px; }
+    .last-maint-icon {
+      flex: 0 0 auto;
+      width: 42px; height: 42px;
+      border-radius: 14px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(0, 229, 192, 0.22);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px;
+      color: var(--accent);
+    }
+    .last-maint-body { min-width: 0; flex: 1; }
+    .last-maint-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .last-maint-meta { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+    /* ================= НАПОМИНАНИЕ ================= */
+    .reminder {
+      display: none;
+      align-items: flex-start;
+      gap: 13px;
+      border-radius: var(--radius-card);
+      padding: 18px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255, 90, 95, 0.35);
+      background: rgba(255, 90, 95, 0.08);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-soft);
+    }
+    .reminder.is-soon { border-color: rgba(255, 193, 7, 0.35); background: rgba(255, 193, 7, 0.08); }
+    .reminder-icon {
+      flex: 0 0 auto;
+      width: 38px; height: 38px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      background: rgba(255, 90, 95, 0.16);
+      color: var(--danger);
+    }
+    .reminder.is-soon .reminder-icon { background: rgba(255, 193, 7, 0.16); color: var(--warn); }
+    .reminder-body { min-width: 0; flex: 1; }
+    .reminder-title { font-size: 15px; font-weight: 700; color: var(--danger); margin-bottom: 4px; }
+    .reminder.is-soon .reminder-title { color: var(--warn); }
+    .reminder-text { font-size: 13px; color: var(--text); line-height: 1.5; }
+
+    /* ================= ЗАГРУЗКА ФОТО В ФОРМАХ АВТО ================= */
+    .photo-field { margin-bottom: 14px; }
+    .photo-drop {
+      display: block;
+      position: relative;
+      border: 1px dashed var(--border-strong);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .photo-drop:active { background: rgba(255, 255, 255, 0.06); border-color: var(--accent); }
+    .photo-drop-empty {
+      height: 132px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .photo-drop-empty .photo-plus { font-size: 26px; line-height: 1; color: var(--accent); }
+    .photo-drop-empty .photo-hint { font-size: 12px; font-weight: 500; color: #6E747C; }
+    .photo-preview {
+      display: block;
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+    }
+    /* «Скрытый» file input: не display:none, иначе iOS не откроет галерею */
+    .photo-input {
+      position: absolute;
+      width: 1px; height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .photo-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .photo-actions .btn { padding: 11px 14px; font-size: 14px; font-weight: 600; }
+
+    /* ================= ПРОЧЕЕ ================= */
+    .row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .row-between .section-title { margin-bottom: 0; }
+    .fab-add {
+      width: auto;
+      padding: 11px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-btn);
+      box-shadow: none;
+    }
+    .card-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .card-actions .btn {
+      flex: 1;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: var(--radius-btn);
+      box-shadow: none;
+    }
+    .card-actions .btn-danger-soft {
+      background: rgba(255, 90, 95, 0.10);
+      color: var(--danger);
+      border: 1px solid rgba(255, 90, 95, 0.28);
+    }
+    .card-actions .btn-danger-soft:active { background: rgba(255, 90, 95, 0.18); }
+    .maint-card { position: relative; padding-right: 88px; }
+    .maint-delete {
+      position: absolute;
+      top: 16px; right: 16px;
+      background: none;
+      border: none;
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 4px;
+    }
+    .money { font-size: 20px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+    .muted { color: var(--text-dim); font-size: 13px; margin-top: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+    /* название авто в карточке «Гараж»: длинные слова переносим, а не вылезаем за край */
+    .vehicle-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      overflow-wrap: anywhere;
+    }
+    .refuel-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid rgba(0, 229, 192, 0.22);
+      border-radius: 999px;
+      padding: 3px 8px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
   </style>
 </head>
 <body>
@@ -194,37 +536,71 @@
 
   <!-- ГЛАВНАЯ -->
   <div id="tab-home" class="tab-content">
-    <!-- Блок напоминаний -->
-    <div id="reminder-box" style="display: none; background: rgba(255, 90, 95, 0.1); border: 1px solid var(--danger); border-radius: 18px; padding: 20px; margin-bottom: 20px;">
-      <div style="font-size: 20px; margin-bottom: 4px;">⚠️</div>
-      <div style="color: var(--danger); font-weight: 700; font-size: 16px; margin-bottom: 4px;" id="reminder-title">Пора на ТО!</div>
-      <div style="font-size: 14px; color: var(--text);" id="reminder-text">Текст напоминания</div>
+    <!-- Блок напоминаний о ТО (показывается из loadHome) -->
+    <div id="reminder-box" class="reminder">
+      <div class="reminder-icon" id="reminder-icon">⚠️</div>
+      <div class="reminder-body">
+        <div class="reminder-title" id="reminder-title">Пора на ТО!</div>
+        <div class="reminder-text" id="reminder-text">Текст напоминания</div>
+      </div>
     </div>
 
     <!-- C1: выбор активного автомобиля (скрыт, если машина одна) -->
-    <select id="active-vehicle-select" class="input" style="margin-bottom: 12px; display: none;" onchange="setActiveVehicle(this.value)"></select>
+    <select id="active-vehicle-select" class="input" style="margin-bottom: 16px; display: none;" onchange="setActiveVehicle(this.value)"></select>
 
-    <div class="card" id="home-car-card">
-      <div class="card-label">Мой автомобиль</div>
-      <div class="card-value" style="font-size: 20px;" id="home-car-name">Загрузка...</div>
-      <p style="color: var(--text-dim); font-size: 13px; margin-top: 6px;" id="home-car-mileage">— км</p>
-      <button class="btn" onclick="openUpdateMileage()" style="margin-top: 12px; padding: 10px; font-size: 14px; background: var(--bg); color: var(--text); border: 1px solid var(--border);">Обновить пробег</button>
+    <!-- HERO: фото авто, поверх — марка/модель и пробег -->
+    <div class="hero" id="home-car-card">
+      <div class="hero-media">
+        <div id="home-car-photo-wrap">
+          <div class="hero-placeholder">🚗</div>
+        </div>
+        <div class="hero-badge" id="home-car-year" style="display: none;"></div>
+        <div class="hero-fade"></div>
+        <div class="hero-info">
+          <div class="hero-name" id="home-car-name">Загрузка...</div>
+          <div class="hero-mileage" id="home-car-mileage">— км</div>
+        </div>
+      </div>
+      <div class="hero-body">
+        <div class="hero-chips">
+          <span class="hero-chip">Расход: <span id="home-consumption">— л/100 км</span></span>
+        </div>
+        <button class="btn btn-soft" onclick="openUpdateMileage()">Обновить пробег</button>
+      </div>
     </div>
+
+    <!-- ПОСЛЕДНЕЕ ТО -->
     <div class="card">
-      <div class="card-label">Расход (по БК)</div>
-      <div class="card-value accent" id="home-consumption">— л/100 км</div>
+      <div class="card-label">Последнее ТО</div>
+      <div class="last-maint">
+        <div class="last-maint-icon">⚙</div>
+        <div class="last-maint-body">
+          <div class="last-maint-title" id="last-maint-title">Нет данных о ТО</div>
+          <div class="last-maint-meta" id="last-maint-meta">Добавь запись в разделе «Обслуживание»</div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-label">Расходы за месяц</div>
-      <div class="card-value" id="home-expenses">— ₽</div>
+
+    <!-- РАСХОДЫ ЗА МЕСЯЦ: две компактные карточки в ряд -->
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">Топливо</div>
+        <div class="stat-value accent" id="home-fuel">— ₽</div>
+        <div class="stat-note">за месяц</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Прочее</div>
+        <div class="stat-value" id="home-expenses">— ₽</div>
+        <div class="stat-note">за месяц</div>
+      </div>
     </div>
   </div>
 
   <!-- ГАРАЖ -->
   <div id="tab-garage" class="tab-content" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div class="section-title" style="margin-bottom: 0;">Мой гараж</div>
-      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddVehicle()">+ Добавить</button>
+    <div class="row-between">
+      <div class="section-title">Мой гараж</div>
+      <button class="btn fab-add" onclick="openAddVehicle()">+ Добавить</button>
     </div>
 
     <div id="vehicles-list">
@@ -235,9 +611,9 @@
 
   <!-- ОБСЛУЖИВАНИЕ -->
   <div id="tab-maint" class="tab-content" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div class="section-title" style="margin-bottom: 0;">Обслуживание</div>
-      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddMaint()">+ Добавить</button>
+    <div class="row-between">
+      <div class="section-title">Обслуживание</div>
+      <button class="btn fab-add" onclick="openAddMaint()">+ Добавить</button>
     </div>
 
     <div id="maint-list">
@@ -247,9 +623,9 @@
 
   <!-- РАСХОДЫ -->
   <div id="tab-expenses" class="tab-content" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div class="section-title" style="margin-bottom: 0;">Расходы</div>
-      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddExpense()">+ Добавить</button>
+    <div class="row-between">
+      <div class="section-title">Расходы</div>
+      <button class="btn fab-add" onclick="openAddExpense()">+ Добавить</button>
     </div>
 
     <div id="expenses-list">
@@ -259,9 +635,9 @@
 
   <!-- ЗАПРАВКИ -->
   <div id="tab-refuels" class="tab-content" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div class="section-title" style="margin-bottom: 0;">Заправки</div>
-      <button class="btn" style="width: auto; padding: 10px 16px; font-size: 14px;" onclick="openAddRefuel()">+ Добавить</button>
+    <div class="row-between">
+      <div class="section-title">Заправки</div>
+      <button class="btn fab-add" onclick="openAddRefuel()">+ Добавить</button>
     </div>
 
     <div class="card">
@@ -571,6 +947,9 @@
       expenseFormVehicleId = null;
     } else if (id === 'edit-vehicle-modal') {
       editVehicleModalOpening = false;
+      resetPhotoState();
+    } else if (id === 'add-vehicle-modal') {
+      resetPhotoState();
     } else if (id === 'update-mileage-modal') {
       mileageModalOpening = false;
     }
@@ -659,22 +1038,211 @@
   // ==========================================
   // ГАРАЖ
   // ==========================================
+  // ==========================================
+  // ФОТО АВТОМОБИЛЯ (Supabase Storage, бакет vehicle_photos)
+  // ==========================================
+  const PHOTO_BUCKET = 'vehicle_photos';
+  const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // 8 МБ: больше не грузим с телефона
+
+  // Выбранный файл и «старый» URL живут в переменных, привязанных к конкретной
+  // форме. Привязка по id модалки, чтобы не тащить файл между формами.
+  let pendingPhotoFile = null;
+  let pendingPhotoModal = null;   // 'add-vehicle-modal' | 'edit-vehicle-modal'
+  let pendingPhotoPreviewUrl = null;
+  let pendingPhotoCleared = false; // пользователь нажал «Убрать фото»
+  let pendingPhotoOldUrl = null;   // что лежит в photo_url сейчас (для edit)
+
+  // Убираем за собой object URL — иначе превью держит файл в памяти
+  function releasePhotoPreview() {
+    if (pendingPhotoPreviewUrl) {
+      try { URL.revokeObjectURL(pendingPhotoPreviewUrl); } catch (e) { /* не критично */ }
+      pendingPhotoPreviewUrl = null;
+    }
+  }
+
+  function resetPhotoState() {
+    releasePhotoPreview();
+    pendingPhotoFile = null;
+    pendingPhotoModal = null;
+    pendingPhotoCleared = false;
+    pendingPhotoOldUrl = null;
+  }
+
+  // Ссылка на фото из базы может быть какой угодно (её пишет клиент).
+  // Пускаем только http(s) и blob: — иначе в src можно подсунуть
+  // javascript:/data:-URL. Для отображения это не критично, но лишний
+  // вектор в атрибуте ни к чему.
+  function safePhotoUrl(url) {
+    const s = typeof url === 'string' ? url.trim() : '';
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/^blob:/i.test(s)) return s;
+    return '';
+  }
+
+  // Разметка блока загрузки — одинаковая в обеих формах.
+  // <input type="file"> не display:none, а визуально скрыт: на iOS
+  // display:none иногда не даёт открыть выбор файла из label.
+  function photoFieldHtml(modalId, currentUrl) {
+    const safeUrl = safePhotoUrl(currentUrl);
+    const hasPhoto = safeUrl !== '';
+    return `
+      <div class="photo-field" id="photo-field-${modalId}">
+        <div class="card-label" style="margin-bottom: 8px;">Фото автомобиля</div>
+        <label class="photo-drop" for="photo-input-${modalId}">
+          <input type="file" id="photo-input-${modalId}" class="photo-input" accept="image/*"
+                 onchange="onPhotoSelected('${modalId}', this)">
+          <div id="photo-preview-wrap-${modalId}">
+            ${hasPhoto
+              ? `<img class="photo-preview" src="${esc(safeUrl)}" alt="Фото автомобиля">`
+              : `<div class="photo-drop-empty">
+                   <div class="photo-plus">＋</div>
+                   <div>Загрузить фото</div>
+                   <div class="photo-hint">JPG или PNG, до 8 МБ</div>
+                 </div>`}
+          </div>
+        </label>
+        <div class="photo-actions" id="photo-actions-${modalId}" style="${hasPhoto ? '' : 'display: none;'}">
+          <button type="button" class="btn btn-outline" onclick="clearVehiclePhoto('${modalId}')">Убрать фото</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Превью выбранного файла + проверки размера/типа
+  function onPhotoSelected(modalId, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    if (!file.type || file.type.indexOf('image/') !== 0) {
+      showToast('Это не картинка. Выбери JPG или PNG.');
+      input.value = '';
+      return;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      showToast('Фото больше 8 МБ. Выбери файл поменьше.');
+      input.value = '';
+      return;
+    }
+
+    releasePhotoPreview();
+    pendingPhotoFile = file;
+    pendingPhotoModal = modalId;
+    pendingPhotoCleared = false; // новый файл отменяет прежнее «убрать»
+    pendingPhotoPreviewUrl = URL.createObjectURL(file);
+
+    const wrap = document.getElementById('photo-preview-wrap-' + modalId);
+    const actions = document.getElementById('photo-actions-' + modalId);
+    if (wrap) {
+      wrap.innerHTML = '';
+      const img = document.createElement('img');
+      img.className = 'photo-preview';
+      img.alt = 'Превью фото';
+      img.src = pendingPhotoPreviewUrl;
+      wrap.appendChild(img);
+    }
+    if (actions) actions.style.display = 'flex';
+    // возвращаем кнопку сохранения в рабочее состояние, если она была «залипла»
+    input.blur();
+  }
+
+  function clearVehiclePhoto(modalId) {
+    releasePhotoPreview();
+    pendingPhotoFile = null;
+    pendingPhotoModal = modalId;
+    // если в форме уже было сохранённое фото — по сохранению очистим photo_url
+    pendingPhotoCleared = true;
+    const input = document.getElementById('photo-input-' + modalId);
+    if (input) input.value = '';
+    const wrap = document.getElementById('photo-preview-wrap-' + modalId);
+    const actions = document.getElementById('photo-actions-' + modalId);
+    if (wrap) {
+      wrap.innerHTML = `<div class="photo-drop-empty">
+          <div class="photo-plus">＋</div>
+          <div>Загрузить фото</div>
+          <div class="photo-hint">JPG или PNG, до 8 МБ</div>
+        </div>`;
+    }
+    if (actions) actions.style.display = 'none';
+  }
+
+  // Итоговое значение photo_url при сохранении формы:
+  // - выбран новый файл → грузим и берём новый URL;
+  // - нажали «Убрать фото» → null (в базе очищаем);
+  // - ничего не трогали при редактировании → оставляем прежний URL.
+  async function resolvePhotoUrl(userId, oldUrlForEdit, vehicleExists) {
+    if (pendingPhotoFile) {
+      const { url, error } = await uploadVehiclePhoto(pendingPhotoFile, userId);
+      if (error) {
+        return { ok: false, message: (error && error.message) ? error.message : 'неизвестная ошибка' };
+      }
+      if (!url) return { ok: false, message: 'Storage не вернул ссылку на файл' };
+      return { ok: true, url };
+    }
+
+    if (pendingPhotoCleared) return { ok: true, url: null };
+
+    if (vehicleExists) return { ok: true, url: oldUrlForEdit || null };
+
+    return { ok: true, url: null };
+  }
+
+  // Загружает файл в Storage и возвращает публичный URL. null — если фото нет.
+  // Важно: имя файла генерируем сами. Оригинальное имя может содержать
+  // кириллицу, пробелы и '#' — такие ключи Storage ломает.
+  async function uploadVehiclePhoto(file, userId) {
+    if (!file) return { url: null, error: null };
+
+    const extMatch = /\.([a-z0-9]+)$/i.exec(file.name || '');
+    let ext = extMatch ? extMatch[1].toLowerCase() : '';
+    if (!ext) {
+      if (file.type === 'image/png') ext = 'png';
+      else if (file.type === 'image/webp') ext = 'webp';
+      else ext = 'jpg';
+    }
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].indexOf(ext) !== -1 ? ext : 'jpg';
+
+    const rand = Math.random().toString(36).slice(2, 8);
+    const path = `${userId}/${Date.now()}-${rand}.${safeExt}`;
+
+    try {
+      const { error: upErr } = await db.storage
+        .from(PHOTO_BUCKET)
+        .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type || undefined });
+
+      if (upErr) return { url: null, error: upErr };
+
+      const { data } = db.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+      const url = data && data.publicUrl ? data.publicUrl : null;
+      if (!url) return { url: null, error: { message: 'Storage не вернул ссылку на файл' } };
+      return { url, error: null };
+    } catch (e) {
+      return { url: null, error: e };
+    }
+  }
+
   function openAddVehicle() {
     if (document.getElementById('add-vehicle-modal')) return; // M5: защита от двойного клика
+
+    resetPhotoState(); // форма открывается чистой: ни файла, ни превью
 
     const modal = document.createElement('div');
     modal.id = 'add-vehicle-modal';
     modal.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      background: rgba(9, 10, 12, 0.72); z-index: 1000;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый автомобиль</div>
-          <button onclick="closeModal('add-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('add-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
         </div>
+
+        ${photoFieldHtml('add-vehicle-modal', '')}
+
         <input type="text" id="v-brand" class="input" placeholder="Марка (например, Toyota)">
         <input type="text" id="v-model" class="input" placeholder="Модель (например, Camry)">
         <input type="number" id="v-year" class="input" placeholder="Год выпуска (например, 2015)">
@@ -707,19 +1275,26 @@
       return;
     }
 
+    resetPhotoState(); // в форму не должен просочиться файл из другой формы
+    pendingPhotoOldUrl = safePhotoUrl(v.photo_url) || null;
+
     const modal = document.createElement('div');
     modal.id = 'edit-vehicle-modal';
     modal.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      background: rgba(9, 10, 12, 0.72); z-index: 1000;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Редактировать авто</div>
-          <button onclick="closeModal('edit-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
+          <button onclick="closeModal('edit-vehicle-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 26px; line-height: 1; padding: 0 4px;">×</button>
         </div>
+
+        ${photoFieldHtml('edit-vehicle-modal', v.photo_url)}
+
         <input type="text" id="ev-brand" class="input" placeholder="Марка" value="${esc(v.brand || '')}">
         <input type="text" id="ev-model" class="input" placeholder="Модель" value="${esc(v.model || '')}">
         <input type="number" id="ev-year" class="input" placeholder="Год выпуска" value="${v.year === null || v.year === undefined ? '' : esc(v.year)}">
@@ -779,14 +1354,28 @@
     btn.disabled = true;
 
     try {
-      const { error } = await db.from('vehicles').update({
+      // Фото грузим ДО обновления строки: если Storage откажет,
+      // в базе останется старый photo_url, а не битая ссылка.
+      const photo = await resolvePhotoUrl(userId, pendingPhotoOldUrl, true);
+      if (!photo.ok) {
+        showToast('Не удалось загрузить фото: ' + photo.message);
+        return;
+      }
+
+      // photo_url кладём в запрос только когда есть что положить (или надо
+      // очистить). Так приложение продолжает работать, даже если колонку
+      // photo_url в таблице vehicles ещё не создали.
+      const payload = {
         brand: brand,
         model: model,
         year: year ? parseInt(year, 10) : null,
         current_mileage: mileage === '' ? null : parseInt(mileage, 10),
         fuel_consumption: consumption === '' ? null : num(consumption, null),
         service_interval: interval ? parseInt(interval, 10) : 10000
-      }).eq('id', id).eq('user_id', userId);
+      };
+      if (photo.url || pendingPhotoCleared) payload.photo_url = photo.url;
+
+      const { error } = await db.from('vehicles').update(payload).eq('id', id).eq('user_id', userId);
 
       if (error) {
         showToast('Ошибка: ' + error.message);
@@ -842,7 +1431,15 @@
     btn.disabled = true;
 
     try {
-      const { error } = await db.from('vehicles').insert({
+      // Фото — до вставки строки: не хотим создать авто с битой ссылкой,
+      // если Storage недоступен.
+      const photo = await resolvePhotoUrl(userId, null, false);
+      if (!photo.ok) {
+        showToast('Не удалось загрузить фото: ' + photo.message);
+        return;
+      }
+
+      const payload = {
         user_id: userId,
         brand: brand,
         model: model,
@@ -850,7 +1447,12 @@
         current_mileage: mileage === '' ? null : parseInt(mileage, 10),
         fuel_consumption: document.getElementById('v-consumption').value ? num(document.getElementById('v-consumption').value, null) : null,
         service_interval: document.getElementById('v-interval').value ? parseInt(document.getElementById('v-interval').value, 10) : 10000
-      });
+      };
+      // Поле добавляем, только если фото реально выбрано: приложение должно
+      // продолжать работать и до появления колонки photo_url в таблице.
+      if (photo.url) payload.photo_url = photo.url;
+
+      const { error } = await db.from('vehicles').insert(payload);
 
       if (error) {
         showToast('Ошибка при сохранении: ' + error.message);
@@ -927,13 +1529,12 @@
       const isActive = v.id === activeVehicleId;
       card.innerHTML = `
         <div class="card-label">${esc(v.year || 'Год не указан')}${isActive ? ' • активный' : ''}</div>
-        <div style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${esc(v.brand || '')} ${esc(v.model || '')}</div>
-        <div style="color: var(--text-dim); font-size: 14px; margin-bottom: 16px;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
-        <button class="btn" onclick="openEditVehicle('${esc(v.id)}')" style="background: var(--bg); color: var(--text); border: 1px solid var(--border); font-size: 14px; padding: 10px 14px;">Редактировать</button>
-        <button onclick="deleteVehicle('${esc(v.id)}', '${jsStr((v.brand || '') + ' ' + (v.model || ''))}')"
-          style="background: var(--bg); color: var(--danger); border: 1px solid var(--border); font-size: 14px; padding: 10px 14px; margin-top: 8px; cursor: pointer;">
-          Удалить
-        </button>
+        <div class="vehicle-name">${esc(v.brand || '')} ${esc(v.model || '')}</div>
+        <div class="muted" style="margin-top: 0;">Пробег: ${fmtNum(v.current_mileage || 0)} км</div>
+        <div class="card-actions">
+          <button class="btn btn-soft" onclick="openEditVehicle('${esc(v.id)}')">Редактировать</button>
+          <button class="btn btn-danger-soft" onclick="deleteVehicle('${esc(v.id)}', '${jsStr((v.brand || '') + ' ' + (v.model || ''))}')">Удалить</button>
+        </div>
       `;
       list.appendChild(card);
     });
@@ -1027,11 +1628,12 @@
     modal.id = 'update-mileage-modal';
     modal.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      background: rgba(9, 10, 12, 0.72); z-index: 1000;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Обновить пробег</div>
           <button onclick="closeModal('update-mileage-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -1110,24 +1712,97 @@
   // ==========================================
   // ГЛАВНАЯ
   // ==========================================
+  // Показывает в hero фото машины, а если ссылки нет — градиентный плейсхолдер.
+  // Собираем <img> через DOM, а не через innerHTML: URL приходит из базы,
+  // и вставлять его строкой в разметку нельзя (инъекция атрибута).
+  function renderHeroPhoto(url) {
+    const wrap = document.getElementById('home-car-photo-wrap');
+    if (!wrap) return;
+
+    // ссылку из базы пропускаем через белый список схем (http/https/blob)
+    const clean = safePhotoUrl(url);
+    wrap.innerHTML = '';
+
+    if (!clean) {
+      wrap.innerHTML = '<div class="hero-placeholder">🚗</div>';
+      return;
+    }
+
+    const img = document.createElement('img');
+    img.className = 'hero-photo';
+    img.alt = 'Фото автомобиля';
+    img.loading = 'lazy';
+    img.onerror = () => { wrap.innerHTML = '<div class="hero-placeholder">🚗</div>'; };
+    img.src = clean;
+    wrap.appendChild(img);
+  }
+
+  function renderHeroYear(year) {
+    const badge = document.getElementById('home-car-year');
+    if (!badge) return;
+    if (year === null || year === undefined || year === '') {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    } else {
+      badge.textContent = String(year);
+      badge.style.display = 'block';
+    }
+  }
+
+  // «Последнее ТО» — самая свежая запись по дате; при равных датах
+  // выигрывает та, что создана позже (иначе две записи за один день
+  // показывались бы в произвольном порядке).
+  function renderLastMaint(records) {
+    const titleEl = document.getElementById('last-maint-title');
+    const metaEl = document.getElementById('last-maint-meta');
+    if (!titleEl || !metaEl) return;
+
+    const items = (records || []).slice().sort((a, b) => {
+      const da = String(a.date || '');
+      const db_ = String(b.date || '');
+      if (da !== db_) return da < db_ ? 1 : -1;
+      const ca = String(a.created_at || '');
+      const cb = String(b.created_at || '');
+      if (ca === cb) return 0;
+      return ca < cb ? 1 : -1;
+    });
+
+    const last = items[0];
+    if (!last) {
+      titleEl.textContent = 'Нет данных о ТО';
+      metaEl.textContent = 'Добавь запись в разделе «Обслуживание»';
+      return;
+    }
+
+    titleEl.textContent = last.title || 'Работа без названия';
+
+    const parts = [formatDate(last.date)];
+    const mileage = last.mileage === null || last.mileage === undefined ? null : num(last.mileage, 0);
+    parts.push(mileage === null ? 'пробег не указан' : `${fmtNum(mileage)} км`);
+    const cost = last.cost === null || last.cost === undefined ? null : num(last.cost, 0);
+    if (cost !== null) parts.push(cost > 0 ? fmtMoney(cost) : 'без стоимости');
+    metaEl.textContent = parts.join(' • ');
+  }
+
   async function loadHome() {
     const nameEl = document.getElementById('home-car-name');
     const mileageEl = document.getElementById('home-car-mileage');
     const consEl = document.getElementById('home-consumption');
     const expEl = document.getElementById('home-expenses');
+    const fuelEl = document.getElementById('home-fuel');
     const reminderBox = document.getElementById('reminder-box');
 
-    nameEl.style.fontSize = '20px'; // L1: сбрасываем размер из «пустого» состояния
-
     if (!activeVehicleId) {
+      renderHeroPhoto('');
+      renderHeroYear(null);
+      renderLastMaint([]);
       nameEl.textContent = lastVehiclesLoadError ? 'Не удалось загрузить' : 'Ещё не добавлен';
-      nameEl.style.fontSize = '16px';
       mileageEl.textContent = lastVehiclesLoadError
         ? 'Проверь соединение и обнови страницу'
         : 'Перейди в «Гараж» → «Добавить авто»';
       consEl.textContent = lastVehiclesLoadError ? '—' : 'не указан';
-      consEl.style.fontSize = '16px';
       expEl.textContent = lastVehiclesLoadError ? '— ₽' : '0 ₽';
+      if (fuelEl) fuelEl.textContent = lastVehiclesLoadError ? '— ₽' : '0 ₽';
       if (reminderBox) reminderBox.style.display = 'none';
       return;
     }
@@ -1136,26 +1811,33 @@
     if (vErr) {
       // Не показываем «нет автомобиля» при ошибке сети — это разные ситуации
       console.error(vErr);
+      renderHeroPhoto('');
+      renderHeroYear(null);
+      renderLastMaint([]);
       nameEl.textContent = 'Не удалось загрузить';
-      nameEl.style.fontSize = '16px';
       mileageEl.textContent = 'Проверь соединение и обнови страницу';
       consEl.textContent = '—';
-      consEl.style.fontSize = '16px';
       expEl.textContent = '— ₽';
+      if (fuelEl) fuelEl.textContent = '— ₽';
       if (reminderBox) reminderBox.style.display = 'none';
       return;
     }
 
     if (!v) {
+      renderHeroPhoto('');
+      renderHeroYear(null);
+      renderLastMaint([]);
       nameEl.textContent = 'Ещё не добавлен';
-      nameEl.style.fontSize = '16px';
       mileageEl.textContent = 'Перейди в «Гараж» → «Добавить авто»';
       consEl.textContent = 'не указан';
-      consEl.style.fontSize = '16px';
       expEl.textContent = '0 ₽';
+      if (fuelEl) fuelEl.textContent = '0 ₽';
       if (reminderBox) reminderBox.style.display = 'none';
       return;
     }
+
+    renderHeroPhoto(v.photo_url);
+    renderHeroYear(v.year);
 
     nameEl.textContent = `${v.brand || ''} ${v.model || ''}`.trim() || 'Автомобиль';
     mileageEl.textContent = `Пробег: ${fmtNum(v.current_mileage || 0)} км`;
@@ -1163,22 +1845,18 @@
     const consumption = v.fuel_consumption === null || v.fuel_consumption === undefined || v.fuel_consumption === ''
       ? null
       : num(v.fuel_consumption, null);
-    if (consumption !== null) {
-      consEl.textContent = consumption.toFixed(1) + ' л/100 км';
-      consEl.style.fontSize = '28px';
-    } else {
-      consEl.textContent = 'не указан';
-      consEl.style.fontSize = '16px';
-    }
+    consEl.textContent = consumption !== null ? consumption.toFixed(1) + ' л/100 км' : 'не указан';
 
     // C2: расходы считаем ТОЛЬКО по активному автомобилю
-    const [maintRes, expRes] = await Promise.all([
+    const [maintRes, expRes, refuelRes] = await Promise.all([
       db.from('maintenance').select('*').eq('vehicle_id', activeVehicleId),
-      db.from('expenses').select('*').eq('vehicle_id', activeVehicleId)
+      db.from('expenses').select('*').eq('vehicle_id', activeVehicleId),
+      db.from('refuels').select('*').eq('vehicle_id', activeVehicleId)
     ]);
 
     if (maintRes.error) console.error(maintRes.error);
     if (expRes.error) console.error(expRes.error);
+    if (refuelRes.error) console.error(refuelRes.error);
 
     // Не показываем «0 ₽» при ошибке загрузки — это ложный ноль
     if (maintRes.error || expRes.error) {
@@ -1194,6 +1872,27 @@
 
       if (expEl) expEl.textContent = fmtMoney(total);
     }
+
+    // «Топливо» за месяц — отдельно от прочих трат.
+    // total_cost в базе может быть NULL (залили на сумму, которую не помним):
+    // такая заправка не должна молча превращаться в 0 ₽ в итоге —
+    // поэтому считаем только записи с известной суммой.
+    if (fuelEl) {
+      if (refuelRes.error) {
+        fuelEl.textContent = '— ₽';
+      } else {
+        let fuelTotal = 0;
+        (refuelRes.data || []).forEach(r => {
+          if (!inCurrentMonth(r.date)) return;
+          if (r.total_cost === null || r.total_cost === undefined) return;
+          fuelTotal += num(r.total_cost, 0);
+        });
+        fuelEl.textContent = fmtMoney(fuelTotal);
+      }
+    }
+
+    // Блок «Последнее ТО»
+    renderLastMaint(maintRes.error ? [] : (maintRes.data || []));
 
     // C3: напоминания о ТО — только по активному авто, только по видам работ,
     // у которых уже есть хотя бы одна запись
@@ -1243,27 +1942,25 @@
         }
       });
 
+      const title = document.getElementById('reminder-title');
+      const text = document.getElementById('reminder-text');
+      const icon = document.getElementById('reminder-icon');
+
       if (!reminderBox) {
         // ничего
       } else if (due.length > 0) {
-        reminderBox.style.display = 'block';
-        reminderBox.style.background = 'rgba(255, 90, 95, 0.1)';
-        reminderBox.style.borderColor = 'var(--danger)';
-        const title = document.getElementById('reminder-title');
-        const text = document.getElementById('reminder-text');
-        title.style.color = 'var(--danger)';
-        title.textContent = '⚠️ Пора на ТО!';
+        reminderBox.classList.remove('is-soon');
+        reminderBox.style.display = 'flex';
+        if (icon) icon.textContent = '⚠️';
+        title.textContent = 'Пора на ТО!';
         text.textContent = 'Пора выполнить: ' + due.map(d =>
           d.kmLeft < 0 ? `${d.name} (перепробег ${fmtNum(Math.abs(d.kmLeft))} км)` : d.name
         ).join(', ') + '.';
       } else if (soon.length > 0) {
-        reminderBox.style.display = 'block';
-        reminderBox.style.background = 'rgba(255, 193, 7, 0.1)';
-        reminderBox.style.borderColor = '#FFC107';
-        const title = document.getElementById('reminder-title');
-        const text = document.getElementById('reminder-text');
-        title.style.color = '#FFC107';
-        title.textContent = '🔔 Скоро ТО';
+        reminderBox.classList.add('is-soon');
+        reminderBox.style.display = 'flex';
+        if (icon) icon.textContent = '🔔';
+        title.textContent = 'Скоро ТО';
         text.textContent = 'Скоро: ' + soon.map(s => `${s.name} (осталось ${fmtNum(s.kmLeft)} км)`).join(', ') + '.';
       } else {
         reminderBox.style.display = 'none';
@@ -1307,11 +2004,12 @@
     modal.id = 'add-maint-modal';
     modal.style.cssText = `
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(14, 15, 17, 0.9); z-index: 1000;
+      background: rgba(9, 10, 12, 0.72); z-index: 1000;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       display: flex; flex-direction: column; justify-content: flex-end;
     `;
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая запись</div>
           <button onclick="closeModal('add-maint-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -1440,7 +2138,7 @@
 
     const m = document.createElement('div');
     m.id = 'add-st-modal';
-    m.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(14,15,17,.9); z-index:1001; display:flex; flex-direction:column; justify-content:flex-end;';
+    m.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(9,10,12,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:1001; display:flex; flex-direction:column; justify-content:flex-end;';
     m.innerHTML = `
       <div style="background:var(--card); border-radius:24px 24px 0 0; padding:24px;">
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
@@ -1556,13 +2254,13 @@
       const card = document.createElement('div');
       card.id = 'maint-card-' + r.id;
       card.className = 'card';
-      card.style.position = 'relative';
+      card.className = 'card maint-card';
       card.innerHTML = `
-        <button onclick="deleteMaint('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)} • ${fmtNum(r.mileage)} км</div>
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${esc(r.title)}</div>
-        <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.cost === null || r.cost === undefined ? '—' : fmtNum(r.cost)} ₽</div>
-        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
+        <button class="maint-delete" onclick="deleteMaint('${esc(r.id)}')">Удалить</button>
+        <div class="card-label">${formatDate(r.date)} • ${fmtNum(r.mileage)} км</div>
+        <div style="font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px;">${esc(r.title)}</div>
+        <div class="money">${r.cost === null || r.cost === undefined ? '—' : fmtMoney(num(r.cost, 0))}</div>
+        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -1602,9 +2300,9 @@
 
     const modal = document.createElement('div');
     modal.id = 'add-refuel-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(9, 10, 12, 0.72); z-index: 1000; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; flex-direction: column; justify-content: flex-end;';
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новая заправка</div>
           <button onclick="closeModal('add-refuel-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -1783,8 +2481,11 @@
 
     empty.style.display = 'none';
 
+    // M5a: заправка без суммы не должна молча обнулять месячный итог —
+    // считаем только записи с известной стоимостью.
     const monthTotal = records
       .filter(r => inCurrentMonth(r.date))
+      .filter(r => r.total_cost !== null && r.total_cost !== undefined)
       .reduce((sum, r) => sum + num(r.total_cost, 0), 0);
 
     if (totalEl) totalEl.textContent = fmtMoney(monthTotal);
@@ -1792,15 +2493,15 @@
     records.forEach(r => {
       const card = document.createElement('div');
       card.id = 'refuel-card-' + r.id;
-      card.className = 'card';
-      card.style.position = 'relative';
+      card.className = 'card maint-card';
       const mileageStr = r.mileage ? ' • ' + fmtNum(r.mileage) + ' км' : '';
+      const fullStr = r.is_full_tank ? '<span class="refuel-tag">полный бак</span>' : '';
       card.innerHTML = `
-        <button onclick="deleteRefuel('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)}${mileageStr}</div>
-        <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">${fmtNum(r.liters)} л</div>
-        <div style="color: var(--accent); font-size: 16px; font-weight: 600;">${r.total_cost === null || r.total_cost === undefined ? '—' : fmtNum(r.total_cost)} ₽</div>
-        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
+        <button class="maint-delete" onclick="deleteRefuel('${esc(r.id)}')">Удалить</button>
+        <div class="card-label">${formatDate(r.date)}${mileageStr}</div>
+        <div style="font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px;">${fmtNum(r.liters)} л ${fullStr}</div>
+        <div class="money">${r.total_cost === null || r.total_cost === undefined ? '— ₽' : fmtMoney(num(r.total_cost, 0))}</div>
+        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -1839,9 +2540,9 @@
 
     const modal = document.createElement('div');
     modal.id = 'add-expense-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(14, 15, 17, 0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: flex-end;';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(9, 10, 12, 0.72); z-index: 1000; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: flex; flex-direction: column; justify-content: flex-end;';
     modal.innerHTML = `
-      <div style="background: var(--card); border-radius: 24px 24px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto;">
+      <div style="background: var(--card); border-radius: 28px 28px 0 0; padding: 24px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
           <div class="section-title" style="margin: 0;">Новый расход</div>
           <button onclick="closeModal('add-expense-modal')" class="modal-close" style="background: none; border: none; color: var(--text-dim); font-size: 24px;">×</button>
@@ -1976,12 +2677,12 @@
       const card = document.createElement('div');
       card.id = 'expense-card-' + r.id;
       card.className = 'card';
-      card.style.position = 'relative';
+      card.className = 'card maint-card';
       card.innerHTML = `
-        <button onclick="deleteExpense('${esc(r.id)}')" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: #FF5A5F; font-size: 14px; cursor: pointer; font-weight: 600;">Удалить</button>
-        <div class="card-label" style="padding-right: 60px;">${formatDate(r.date)} • ${esc(r.category)}</div>
-        <div style="color: var(--accent); font-size: 20px; font-weight: 600;">${fmtNum(r.amount)} ₽</div>
-        ${r.comment ? `<div style="color: var(--text-dim); font-size: 13px; margin-top: 8px;">${esc(r.comment)}</div>` : ''}
+        <button class="maint-delete" onclick="deleteExpense('${esc(r.id)}')">Удалить</button>
+        <div class="card-label">${formatDate(r.date)} • ${esc(r.category)}</div>
+        <div class="money">${fmtMoney(num(r.amount, 0))}</div>
+        ${r.comment ? `<div class="muted">${esc(r.comment)}</div>` : ''}
       `;
       list.appendChild(card);
     });
@@ -2077,6 +2778,17 @@
   });
 
   init();
+
+  // Регистрация service worker. Файл service-worker.js лежит рядом с index.html;
+  // на file:// регистрация невозможна — оборачиваем в try/catch, чтобы
+  // открытие страницы напрямую с диска не ломалось.
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js').catch((e) => {
+        console.warn('Service worker не зарегистрирован:', e);
+      });
+    });
+  }
 </script>
 </body>
 </html>
