@@ -271,6 +271,33 @@
       transition: color 0.15s, background 0.15s;
     }
     .logout:active { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+    /* Кнопки в шапке: обновление + выход. Раньше шапка была flex
+       space-between на два элемента, теперь справа их группа. */
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 0.15s, background 0.15s;
+    }
+    .icon-btn:active { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+    .icon-btn:disabled { opacity: 0.55; cursor: default; }
+    .icon-btn svg { display: block; }
+    /* Пока идёт загрузка, иконка крутится — видно, что нажатие сработало */
+    .icon-btn.is-spinning svg { animation: refreshSpin 0.8s linear infinite; }
+    @keyframes refreshSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
 
     /* ================= HERO-КАРТОЧКА АВТО НА ГЛАВНОЙ ================= */
     .hero {
@@ -921,7 +948,16 @@
         <span class="name" id="header-vehicle-name">—</span>
       </div>
     </div>
-    <button class="logout" onclick="logout()">Выйти</button>
+    <div class="header-actions">
+      <button class="icon-btn" id="refresh-btn" onclick="refreshAll()" aria-label="Обновить данные" title="Обновить данные">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+          <polyline points="21 3 21 9 15 9"></polyline>
+        </svg>
+      </button>
+      <button class="logout" onclick="logout()">Выйти</button>
+    </div>
   </div>
 
   <!-- ГЛАВНАЯ -->
@@ -1178,7 +1214,67 @@
     return { value: (totalLiters / totalKm) * 100, pairsCount };
   }
 
-  // Даты: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса.
+  // Сколько полных месяцев прошло от даты 'YYYY-MM-DD' до сегодня.
+  // Считаем в местных датах: new Date('2026-01-31') разбирается как UTC,
+  // и в Москве (UTC+3) граница месяца уехала бы на день назад.
+  // День месяца не «докручен» (сегодня 5-е, а ТО было 20-го) — месяц
+  // ещё не исполнился, поэтому он не в счёте.
+  function monthsPassedSince(dateStr) {
+    const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+    const probe = new Date(y, mo, d);
+    // 2026-02-31 и подобное: такой даты нет, интервал считать не от чего
+    if (probe.getFullYear() !== y || probe.getMonth() !== mo || probe.getDate() !== d) return null;
+    const now = new Date();
+    let months = (now.getFullYear() - y) * 12 + (now.getMonth() - mo);
+    if (now.getDate() < d) months -= 1;
+    return months;
+  }
+
+  // Подпись для селекта видов работ: пробег, время или оба интервала.
+  function serviceTypeLabel(t) {
+    if (!t) return '';
+    const km = num(t.interval_km, 0);
+    const kmPart = km > 0 ? `${km} км` : '';
+    const months = num(t.interval_months, 0);
+    const monthsPart = months > 0 ? `${months} мес` : '';
+    const parts = [kmPart, monthsPart].filter(Boolean).join(' / ');
+    return parts ? ` (${parts})` : '';
+  }
+
+  // Причина, по которой работа попала в «Пора на ТО!».
+  // Показываем только те критерии, которые реально сработали: иначе
+  // рядом с перепробегом висело бы «осталось 11 мес» и читалось бы
+  // как противоречие. Оба сработали — показываем оба.
+  function reminderDueText(d) {
+    const parts = [];
+    if (d.kmLeft !== null && d.kmLeft <= 0) {
+      // ровно на границе интервала перепробега ещё нет, но ехать уже пора
+      if (d.kmLeft < 0) parts.push(`перепробег ${fmtNum(Math.abs(d.kmLeft))} км`);
+      else parts.push('пробег исчерпан');
+    }
+    if (d.monthsLeft !== null && d.monthsLeft <= 0) {
+      if (d.monthsLeft < 0) parts.push(`просрочено на ${fmtNum(Math.abs(d.monthsLeft))} мес`);
+      else parts.push('срок подошёл');
+    }
+    return parts.length ? `${d.name} (${parts.join(', ')})` : d.name;
+  }
+
+  // Причина для «Скоро ТО»: только тот критерий, который попал в порог
+  // (≤1000 км или ≤1 мес), а не любой заполненный интервал.
+  function reminderSoonText(s) {
+    const parts = [];
+    if (s.kmLeft !== null && s.kmLeft > 0 && s.kmLeft <= 1000) {
+      parts.push(`осталось ${fmtNum(s.kmLeft)} км`);
+    }
+    if (s.monthsLeft !== null && s.monthsLeft > 0 && s.monthsLeft <= 1) {
+      parts.push(s.monthsLeft === 1 ? 'остался 1 мес' : `осталось ${fmtNum(s.monthsLeft)} мес`);
+    }
+    return parts.length ? `${s.name} (${parts.join(', ')})` : s.name;
+  }
+
+  // Дата: 'YYYY-MM-DD' из Postgres разбираем без сдвига часового пояса.
   // Возвращаем '—' для null/undefined/пустых и для несуществующих дат
   // (2026-13-45, 2026-02-31), иначе в списке появился бы «45.13.2026».
   function formatDate(s) {
@@ -2773,7 +2869,14 @@
           .select('*')
           .eq('vehicle_id', activeVehicleId)
           .not('service_type_id', 'is', null)
-          .order('mileage', { ascending: false })
+          // «последнее ТО» — по дате, а не по пробегу: с появлением интервала
+          // по времени срок считается от last.date, и запись с большим
+          // пробегом, но старой датой (опечатка в одометре) перекрывала
+          // свежую — напоминание врало про десятки месяцев просрочки.
+          // Как в renderLastMaint: при равных датах выигрывает более поздняя
+          // по created_at.
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false })
       ]);
 
       if (typesRes.error) console.error(typesRes.error);
@@ -2782,7 +2885,7 @@
       const types = typesRes.data || [];
       const records = recordsRes.data || [];
 
-      // первая запись в массиве = самая свежая (сортировка по mileage DESC)
+      // первая запись в массиве = самая свежая (сортировка по date DESC)
       const lastByType = new Map();
       records.forEach(r => {
         if (r.service_type_id && !lastByType.has(r.service_type_id)) {
@@ -2798,17 +2901,29 @@
         const last = lastByType.get(t.id);
         if (!last) return; // записи нет — напоминание не показываем
 
-        const interval = num(t.interval_km, 0);
-        if (interval <= 0) return; // защита от деления/NaN
+        // Интервалов два: по пробегу и по времени. Любой может быть не задан.
+        const intervalKm = num(t.interval_km, 0);
+        const intervalMonths = num(t.interval_months, 0);
+        if (intervalKm <= 0 && intervalMonths <= 0) return; // считать нечего
 
-        const lastMileage = num(last.mileage, 0);
-        const kmPassed = currentMileage - lastMileage;
-        const kmLeft = interval - kmPassed;
+        // null = критерий не настроен (или дата битая), а не «ноль остался»
+        const kmLeft = intervalKm > 0
+          ? intervalKm - (currentMileage - num(last.mileage, 0))
+          : null;
+        const passedMonths = intervalMonths > 0 ? monthsPassedSince(last.date) : null;
+        const monthsLeft = passedMonths === null ? null : intervalMonths - passedMonths;
 
-        if (kmLeft <= 0) {
-          due.push({ name: t.name, kmLeft: kmLeft });
-        } else if (kmLeft <= 1000) {
-          soon.push({ name: t.name, kmLeft: kmLeft });
+        const kmDue = kmLeft !== null && kmLeft <= 0;
+        const kmSoon = kmLeft !== null && kmLeft > 0 && kmLeft <= 1000;
+        const monthsDue = monthsLeft !== null && monthsLeft <= 0;
+        const monthsSoon = monthsLeft !== null && monthsLeft > 0 && monthsLeft <= 1;
+
+        // Сработал хотя бы один критерий — работа попадает в список один раз:
+        // сначала due, только потом soon, иначе одна работа висела бы в двух.
+        if (kmDue || monthsDue) {
+          due.push({ name: t.name, kmLeft: kmLeft, monthsLeft: monthsLeft });
+        } else if (kmSoon || monthsSoon) {
+          soon.push({ name: t.name, kmLeft: kmLeft, monthsLeft: monthsLeft });
         }
       });
 
@@ -2823,15 +2938,13 @@
         reminderBox.style.display = 'flex';
         if (icon) icon.textContent = '⚠️';
         title.textContent = 'Пора на ТО!';
-        text.textContent = 'Пора выполнить: ' + due.map(d =>
-          d.kmLeft < 0 ? `${d.name} (перепробег ${fmtNum(Math.abs(d.kmLeft))} км)` : d.name
-        ).join(', ') + '.';
+        text.textContent = 'Пора выполнить: ' + due.map(reminderDueText).join(', ') + '.';
       } else if (soon.length > 0) {
         reminderBox.classList.add('is-soon');
         reminderBox.style.display = 'flex';
         if (icon) icon.textContent = '🔔';
         title.textContent = 'Скоро ТО';
-        text.textContent = 'Скоро: ' + soon.map(s => `${s.name} (осталось ${fmtNum(s.kmLeft)} км)`).join(', ') + '.';
+        text.textContent = 'Скоро: ' + soon.map(reminderSoonText).join(', ') + '.';
       } else {
         reminderBox.style.display = 'none';
       }
@@ -2867,7 +2980,7 @@
     }
 
     const options = (types || []).map(t =>
-      `<option value="${esc(t.id)}">${esc(t.name)} (${esc(t.interval_km)} км)</option>`
+      `<option value="${esc(t.id)}">${esc(t.name)}${esc(serviceTypeLabel(t))}</option>`
     ).join('');
 
     const modal = document.createElement('div');
@@ -3016,7 +3129,14 @@
           <button onclick="closeModal('add-st-modal')" class="modal-close" style="background:none; border:none; color:var(--text-dim); font-size:24px;">×</button>
         </div>
         <input type="text" id="st-name" class="input" placeholder="Название (например, Замена масла)">
-        <input type="number" id="st-interval" class="input" placeholder="Интервал (км), например 10000" value="10000">
+        <input type="number" id="st-interval" class="input" placeholder="Интервал (км), необязательно" min="1" step="1">
+        <div style="font-size: 12px; color: var(--text-dim); margin: -6px 0 12px 4px;">
+          Можно указать один интервал или оба
+        </div>
+        <input type="number" id="st-interval-months" class="input" placeholder="Интервал по времени (мес), необязательно" min="1" step="1">
+        <div style="font-size: 12px; color: var(--text-dim); margin: -6px 0 12px 4px;">
+          Для работ, которые делают раз в год, даже если пробег небольшой
+        </div>
         <button class="btn" onclick="saveServiceType()" id="save-st-btn" style="margin-top: 8px;">Сохранить вид работ</button>
         ${cancelBtn('add-st-modal')}
       </div>
@@ -3027,10 +3147,42 @@
 
   async function saveServiceType() {
     const name = document.getElementById('st-name').value.trim();
-    const interval = parseInt(document.getElementById('st-interval').value, 10);
 
-    if (!name || !Number.isFinite(interval) || interval <= 0) {
-      showToast('Заполни название и интервал');
+    if (!name) {
+      showToast('Заполни название');
+      return;
+    }
+
+    // Интервалов два, и оба необязательны по отдельности: масло меняют
+    // по пробегу, тормозную жидкость — раз в 2 года. Требуем хотя бы один,
+    // иначе напоминание считать не от чего и вид работ бесполезен.
+    const kmRaw = document.getElementById('st-interval').value.trim();
+    let interval = null;
+    if (kmRaw !== '') {
+      const parsedKm = Number(kmRaw);
+      if (!Number.isFinite(parsedKm) || !Number.isInteger(parsedKm) || parsedKm <= 0) {
+        showToast('Интервал по пробегу — целое число километров (например, 10000)');
+        return;
+      }
+      interval = parsedKm;
+    }
+
+    // Пустое поле = интервала по времени нет. Заполненное должно быть
+    // целым положительным, иначе в базу уйдёт мусор и напоминание
+    // будет считать срок от «полутора месяцев».
+    const monthsRaw = document.getElementById('st-interval-months').value.trim();
+    let intervalMonths = null;
+    if (monthsRaw !== '') {
+      const parsed = Number(monthsRaw);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+        showToast('Интервал по времени — целое число месяцев (например, 12)');
+        return;
+      }
+      intervalMonths = parsed;
+    }
+
+    if (interval === null && intervalMonths === null) {
+      showToast('Заполни хотя бы один интервал: по пробегу или по времени');
       return;
     }
 
@@ -3050,7 +3202,8 @@
       const { data, error } = await db.from('service_types').insert({
         user_id: userId,
         name: name,
-        interval_km: interval
+        interval_km: interval,
+        interval_months: intervalMonths
       }).select('id').single();
 
       if (error) {
@@ -3063,7 +3216,7 @@
       if (sel && data && data.id) {
         const opt = document.createElement('option');
         opt.value = data.id;
-        opt.textContent = `${name} (${interval} км)`;
+        opt.textContent = `${name}${serviceTypeLabel({ interval_km: interval, interval_months: intervalMonths })}`;
         sel.appendChild(opt);
         sel.value = data.id;
       }
@@ -3807,6 +3960,39 @@
   // ==========================================
   let loadedForUser = null;
   let loadAllPromise = null;
+
+  // «Обновить» в шапке: перечитывает всё, не трогая открытую вкладку.
+  // Нужно, когда запись сделана с другого устройства — раньше данные
+  // подтягивались только при переключении вкладок или перезагрузке.
+  async function refreshAll() {
+    if (!acquireSave('refresh')) return; // двойной клик не запустит второй цикл
+
+    const btn = document.getElementById('refresh-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-spinning');
+    }
+
+    try {
+      await loadAllData(); // если цикл уже идёт, дождёмся его, а не начнём новый
+      // loadVehicles() гасит ошибку запроса и запоминает её в флаге,
+      // поэтому одного catch мало: без этой проверки пользователь
+      // увидел бы «обновилось», хотя на экране остались старые данные.
+      if (lastVehiclesLoadError) {
+        showToast('Не удалось обновить. Проверь соединение.');
+      }
+    } catch (e) {
+      console.error('Ошибка обновления:', e);
+      showToast('Не удалось обновить. Проверь соединение.');
+    } finally {
+      releaseSave('refresh');
+      const btnNow = document.getElementById('refresh-btn');
+      if (btnNow) {
+        btnNow.disabled = false;
+        btnNow.classList.remove('is-spinning');
+      }
+    }
+  }
 
   async function loadAllData() {
     // Защита от параллельного запуска: init() и onAuthStateChange (событие
