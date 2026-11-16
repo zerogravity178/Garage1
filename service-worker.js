@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'my-garage-v8';
+const CACHE_VERSION = 'my-garage-v9';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 
