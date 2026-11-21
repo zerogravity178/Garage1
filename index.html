@@ -891,6 +891,42 @@
       flex: none;
       accent-color: var(--danger);
     }
+
+    /* ================= УМНЫЙ ПРОБЕГ ================= */
+    /* Подпись с прогнозом под полем пробега. Цвет = насколько можно
+       доверять числу: свежая история — акцент, старые данные — жёлтый. */
+    .mileage-prediction {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin: -8px 0 12px 4px;
+      line-height: 1.4;
+    }
+    .mileage-prediction.is-high { color: var(--accent); }
+    .mileage-prediction.is-medium { color: var(--text-dim); }
+    .mileage-prediction.is-low { color: var(--warn); }
+
+    .mileage-quick-btns {
+      display: flex;
+      gap: 8px;
+      margin: -8px 0 12px;
+    }
+    .mileage-quick-btns button {
+      flex: 1;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .mileage-quick-btns button:active {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    #mileage-stale-banner-wrap { margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -962,6 +998,9 @@
 
   <!-- ГЛАВНАЯ -->
   <div id="tab-home" class="tab-content">
+    <!-- Баннер «пробег не обновлялся» (наполняется из loadHome) -->
+    <div id="mileage-stale-banner-wrap"></div>
+
     <!-- Блок напоминаний о ТО (показывается из loadHome) -->
     <div id="reminder-box" class="reminder">
       <div class="reminder-icon" id="reminder-icon">⚠️</div>
@@ -1126,6 +1165,7 @@
   let maintModalOpening = false;
   let editVehicleModalOpening = false;
   let mileageModalOpening = false;
+  let refuelModalOpening = false;
 
   // Автомобиль, для которого открыта форма ТО: фиксируется при открытии,
   // чтобы смена активного авто не перенаправила сохраняемую запись.
@@ -1299,6 +1339,182 @@
   function inCurrentMonth(s) {
     if (!s) return false;
     return String(s).slice(0, 7) === currentMonthKey();
+  }
+
+  // Номер суток из 'YYYY-MM-DD' — считаем в UTC-полночь, чтобы разница
+  // между двумя датами была целым числом суток и не зависела от часового
+  // пояса. new Date('2026-11-16') тоже даёт UTC, но невалидную дату
+  // (2026-02-31) он молча переносит на март — поэтому проверяем обратно.
+  // null — дата битая или её нет.
+  function dayNumber(dateStr) {
+    const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+    const probe = new Date(Date.UTC(y, mo, d));
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo || probe.getUTCDate() !== d) return null;
+    return Math.floor(probe.getTime() / 86400000);
+  }
+
+  // Сегодняшние сутки по МЕСТНОМУ календарю: в Москве в 01:00 UTC-дата
+  // ещё вчерашняя, и «дней с последней записи» получилось бы на один больше.
+  function todayDayNumber() {
+    const d = new Date();
+    return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  }
+
+  // ---------------------------------------------------------------
+  // УМНЫЙ ПРОБЕГ: прогноз текущего пробега по истории записей.
+  //
+  // Берём последние записи с известным пробегом из заправок и ТО, считаем
+  // средний дневной пробег и продолжаем линию до сегодня. Нужно, чтобы
+  // поле «Пробег» в формах не пустовало: человеку не надо вспоминать
+  // одометр, а отклонение от последней записи — десятки километров.
+  //
+  // Числа проверяем жёстко: если история короткая или одометр в записях
+  // скачет (опечатка, скрученный пробег), прогноз не строим вообще —
+  // лучше пустое поле, чем уверенное неверное число.
+  // ---------------------------------------------------------------
+  const MILEAGE_SAMPLE_SIZE = 10;      // сколько записей берём с каждой таблицы
+  const MILEAGE_MAX_KM_PER_DAY = 1000; // больше — это уже не машина, а опечатка
+
+  async function predictMileage(vehicleId) {
+    const empty = {
+      predicted: null,
+      lastMileage: null,
+      lastDate: null,
+      avgPerDay: null,
+      confidence: 'none'
+    };
+
+    if (!vehicleId) return empty;
+
+    let refuels = [];
+    let maint = [];
+
+    try {
+      const [refuelsRes, maintRes] = await Promise.all([
+        db.from('refuels')
+          .select('date, mileage, created_at')
+          .eq('vehicle_id', vehicleId)
+          .not('mileage', 'is', null)
+          .order('date', { ascending: false })
+          .limit(MILEAGE_SAMPLE_SIZE),
+        db.from('maintenance')
+          .select('date, mileage, created_at')
+          .eq('vehicle_id', vehicleId)
+          .not('mileage', 'is', null)
+          .order('date', { ascending: false })
+          .limit(MILEAGE_SAMPLE_SIZE)
+      ]);
+
+      // Заправка — основной источник: пробег в ней обязателен и её делают
+      // часто. Если не пришла она, линии нет вообще.
+      if (refuelsRes.error) {
+        console.error('Не удалось загрузить историю заправок:', refuelsRes.error);
+        return empty;
+      }
+
+      // ТО — дополнительный источник, записи редкие. Таймаут здесь не должен
+      // обнулять прогноз по десяткам заправок, поэтому продолжаем с тем,
+      // что есть: заправок одних достаточно для линии.
+      if (maintRes.error) {
+        console.error('Не удалось загрузить историю ТО (прогноз по заправкам):', maintRes.error);
+        maint = [];
+      } else {
+        maint = maintRes.data || [];
+      }
+
+      refuels = refuelsRes.data || [];
+    } catch (e) {
+      console.error('Не удалось спрогнозировать пробег:', e);
+      return empty;
+    }
+
+    // Приводим обе таблицы к одному виду. mileage === 0 — тоже валидное
+    // число (новая машина), поэтому проверяем на null/пустую строку,
+    // а не на «ложность» значения.
+    const rows = refuels.concat(maint)
+      .map(r => ({
+        day: dayNumber(r.date),
+        mileage: (r.mileage === null || r.mileage === undefined || r.mileage === '')
+          ? null
+          : num(r.mileage, null),
+        date: String(r.date || '')
+      }))
+      .filter(r => r.day !== null && r.mileage !== null)
+      .sort((a, b) => a.day - b.day);
+
+    if (rows.length < 2) return empty;
+
+    const firstKnown = rows[0];
+    const lastKnown = rows[rows.length - 1];
+    const lastOnly = {
+      ...empty,
+      lastMileage: lastKnown.mileage,
+      lastDate: lastKnown.date || null
+    };
+
+    // Все записи одной датой — делить не на что
+    const spanDays = lastKnown.day - firstKnown.day;
+    if (spanDays <= 0) return lastOnly;
+
+    const avgPerDay = (lastKnown.mileage - firstKnown.mileage) / spanDays;
+    if (!Number.isFinite(avgPerDay) || avgPerDay <= 0 || avgPerDay > MILEAGE_MAX_KM_PER_DAY) {
+      return lastOnly;
+    }
+
+    const today = todayDayNumber();
+    // Дата в будущем (опечатка в годе) не должна уменьшать прогноз
+    const daysSinceLast = Math.max(0, today - lastKnown.day);
+    const predicted = Math.round(lastKnown.mileage + avgPerDay * daysSinceLast);
+
+    // Насколько свежие данные: пять записей за два месяца — регулярный учёт,
+    // две за квартал — тоже история, всё остальное — догадка.
+    const countWithin = (days) => rows.filter(r => (today - r.day) <= days).length;
+    let confidence = 'low';
+    if (countWithin(60) >= 5) confidence = 'high';
+    else if (countWithin(90) >= 2) confidence = 'medium';
+
+    return {
+      predicted,
+      lastMileage: lastKnown.mileage,
+      lastDate: lastKnown.date || null,
+      avgPerDay,
+      confidence
+    };
+  }
+
+  // Подпись под полем пробега. Пустая строка — подписи нет (confidence 'none'
+  // или прогноз не построен), тогда формы показывают свои обычные подсказки.
+  function mileagePredictionHtml(prediction, withConfidence) {
+    if (!prediction || prediction.predicted === null || prediction.predicted === undefined) return '';
+    const conf = prediction.confidence;
+    if (conf !== 'high' && conf !== 'medium' && conf !== 'low') return '';
+
+    const label = withConfidence
+      ? `Прогноз: ${fmtNum(prediction.predicted)} км (точность: ${conf})`
+      : `Прогноз: ${fmtNum(prediction.predicted)} км`;
+    return `<div class="mileage-prediction is-${conf}">${esc(label)}</div>`;
+  }
+
+  // Кнопки «−100 / +100» под полем пробега: поправить прогноз на глаз
+  // проще, чем стирать число и вводить заново.
+  function mileageQuickBtnsHtml(fieldId) {
+    return `<div class="mileage-quick-btns">
+          <button type="button" onclick="adjustMileage('${fieldId}', -100)">−100</button>
+          <button type="button" onclick="adjustMileage('${fieldId}', 100)">+100</button>
+        </div>`;
+  }
+
+  // Сдвиг пробега на шаг. Пустое поле считаем нулём, отрицательным
+  // значение не делаем: одометр назад не едет, а сохранение такое
+  // число всё равно отклонит.
+  function adjustMileage(fieldId, delta) {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    const current = el.value === '' || el.value === null ? 0 : num(el.value, 0);
+    const next = Math.max(0, Math.round(current + delta));
+    el.value = String(next);
   }
 
   // ---------------------------------------------------------------
@@ -1729,6 +1945,7 @@
     maintFormVehicleId = null;
     refuelFormVehicleId = null;
     expenseFormVehicleId = null;
+    refuelModalOpening = false;
     [['vehicles-list', 'vehicles-empty'], ['maint-list', 'maint-empty'], ['expenses-list', 'expenses-empty'], ['refuels-list', 'refuels-empty']]
       .forEach(([listId, emptyId]) => {
         const list = document.getElementById(listId);
@@ -1747,6 +1964,7 @@
     // фактический расход и сводка расходов чужого аккаунта не должны
     // мигать на экране входа
     hideFactChip();
+    hideMileageStaleBanner();
     expensesSummaryPeriod = 'month';
     expensesCache = [];
     hideExpensesSummary();
@@ -1764,6 +1982,7 @@
       maintModalOpening = false;
     } else if (id === 'add-refuel-modal') {
       refuelFormVehicleId = null;
+      refuelModalOpening = false;
     } else if (id === 'add-expense-modal') {
       expenseFormVehicleId = null;
     } else if (id === 'edit-vehicle-modal') {
@@ -2527,10 +2746,17 @@
     }
 
     let v = null;
+    let prediction = null;
     try {
-      const { data, error } = await db.from('vehicles').select('*').eq('id', activeVehicleId).maybeSingle();
-      if (error) console.error(error);
-      v = data;
+      // Прогноз грузим параллельно с самим авто: это независимые запросы,
+      // а ждать их по очереди — лишняя задержка перед показом формы.
+      const [vRes, pRes] = await Promise.all([
+        db.from('vehicles').select('*').eq('id', activeVehicleId).maybeSingle(),
+        predictMileage(activeVehicleId)
+      ]);
+      if (vRes.error) console.error(vRes.error);
+      v = vRes.data;
+      prediction = pRes;
     } catch (e) {
       console.error(e);
     }
@@ -2539,6 +2765,17 @@
       showToast('Автомобиль не найден');
       return;
     }
+    if (!prediction) {
+      prediction = { predicted: null, lastMileage: null, lastDate: null, avgPerDay: null, confidence: 'none' };
+    }
+
+    // Прогноз есть — подставляем его: обычно это и есть текущий пробег
+    // с точностью до десятков километров. Нет прогноза — работаем как раньше,
+    // с сохранённым значением из базы.
+    const hasPrediction = prediction.predicted !== null && prediction.predicted !== undefined;
+    const mileageValue = hasPrediction
+      ? esc(String(prediction.predicted))
+      : (v.current_mileage === null || v.current_mileage === undefined ? '' : esc(v.current_mileage));
 
     const modal = document.createElement('div');
     modal.id = 'update-mileage-modal';
@@ -2556,7 +2793,9 @@
         </div>
         <p style="color: var(--text-dim); font-size: 14px; margin-bottom: 12px;">Текущий пробег: ${fmtNum(v.current_mileage || 0)} км</p>
 
-        <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${v.current_mileage === null || v.current_mileage === undefined ? '' : esc(v.current_mileage)}">
+        <input type="number" id="new-mileage" class="input" placeholder="Новый пробег (км)" value="${mileageValue}">
+        ${hasPrediction ? mileagePredictionHtml(prediction, true) : ''}
+        ${hasPrediction ? mileageQuickBtnsHtml('new-mileage') : ''}
 
         <button class="btn" onclick="saveNewMileage('${esc(v.id)}')" id="save-mileage-btn" style="margin-top: 8px;">Сохранить</button>
         ${cancelBtn('update-mileage-modal')}
@@ -2738,6 +2977,49 @@
     chip.classList.toggle('is-accent', diffTooBig);
   }
 
+  // Баннер «пробег не обновлялся»: если последняя запись с пробегом старше
+  // месяца, прогноз и напоминания о ТО начинают врать — предлагаем освежить
+  // одометр. Контейнер один, содержимое перезаписывается: несколько баннеров
+  // друг под другом выглядели бы как сбой.
+  function hideMileageStaleBanner() {
+    const wrap = document.getElementById('mileage-stale-banner-wrap');
+    if (wrap) wrap.innerHTML = '';
+  }
+
+  function renderMileageStaleBanner(prediction) {
+    const wrap = document.getElementById('mileage-stale-banner-wrap');
+    if (!wrap) return;
+
+    if (!activeVehicleId || !prediction || prediction.lastDate === null || prediction.predicted === null) {
+      wrap.innerHTML = '';
+      return;
+    }
+
+    const lastDay = dayNumber(prediction.lastDate);
+    // Дата битая или в будущем — молчим: «не обновлялся −3 дня» смысла не имеет
+    const daysSince = lastDay === null ? 0 : Math.max(0, todayDayNumber() - lastDay);
+    if (daysSince <= 30) {
+      wrap.innerHTML = '';
+      return;
+    }
+
+    // Внутри только числа и текст — пользовательских строк здесь нет,
+    // esc() всё равно не помешает, если они появятся.
+    wrap.innerHTML = `
+      <div class="reminder is-soon">
+        <div class="reminder-icon">📅</div>
+        <div class="reminder-body">
+          <div class="reminder-title">Пробег не обновлялся ${esc(String(daysSince))} дней</div>
+          <div class="reminder-text">Напоминания о ТО могут быть неточными.</div>
+          <button class="btn btn-soft" onclick="openUpdateMileage()"
+            style="margin-top: 12px; width: auto; padding: 10px 16px; font-size: 14px;">
+            Обновить пробег
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   async function loadHome() {
     const nameEl = document.getElementById('home-car-name');
     const mileageEl = document.getElementById('home-car-mileage');
@@ -2745,6 +3027,11 @@
     const expEl = document.getElementById('home-expenses');
     const fuelEl = document.getElementById('home-fuel');
     const reminderBox = document.getElementById('reminder-box');
+
+    // Баннер убираем сразу: если загрузка упадёт на середине, старый
+    // «пробег не обновлялся» остался бы висеть с устаревшим числом.
+    // Нужный баннер отрисуем в конце, когда данные уже есть.
+    hideMileageStaleBanner();
 
     if (!activeVehicleId) {
       renderHeroPhoto('');
@@ -2952,6 +3239,16 @@
       console.log('Ошибка в напоминаниях:', e);
       if (reminderBox) reminderBox.style.display = 'none';
     }
+
+    // Баннер «пробег не обновлялся» — последним: он опирается на историю
+    // записей и ничего не ломает, если её не удалось получить.
+    try {
+      const prediction = await predictMileage(activeVehicleId);
+      renderMileageStaleBanner(prediction);
+    } catch (e) {
+      console.error('Не удалось построить баннер пробега:', e);
+      hideMileageStaleBanner();
+    }
   }
 
   // ==========================================
@@ -2978,6 +3275,11 @@
     } catch (e) {
       console.error(e);
     }
+
+    // Прогноз пробега — подсказка для поля «Пробег». Не критичен: при любой
+    // проблеме поле останется пустым, как было раньше.
+    const prediction = await predictMileage(formVehicleId);
+    const hasPrediction = prediction && prediction.predicted !== null && prediction.predicted !== undefined;
 
     const options = (types || []).map(t =>
       `<option value="${esc(t.id)}">${esc(t.name)}${esc(serviceTypeLabel(t))}</option>`
@@ -3006,7 +3308,9 @@
         </select>
 
         ${dateFieldHtml('m-date', todayStr())}
-        <input type="number" id="m-mileage" class="input" placeholder="Пробег (км)">
+        <input type="number" id="m-mileage" class="input" placeholder="Пробег (км)" value="${hasPrediction ? esc(String(prediction.predicted)) : ''}">
+        ${hasPrediction ? mileagePredictionHtml(prediction, true) : ''}
+        ${hasPrediction ? mileageQuickBtnsHtml('m-mileage') : ''}
         <input type="number" id="m-cost" class="input" placeholder="Стоимость (₽)">
         <input type="text" id="m-comment" class="input" placeholder="Комментарий (необязательно)">
 
@@ -3324,12 +3628,69 @@
   // ЗАПРАВКИ
   // ==========================================
   async function openAddRefuel() {
-    if (document.getElementById('add-refuel-modal')) return; // M5
+    // Функция стала асинхронной (прогноз пробега и прошлая заправка грузятся
+    // до отрисовки), поэтому проверки по DOM уже недостаточно: два быстрых
+    // клика успевают пройти её до appendChild и создают две модалки с одним id.
+    if (refuelModalOpening || document.getElementById('add-refuel-modal')) return; // M5
+    refuelModalOpening = true;
 
     if (!activeVehicleId) {
+      refuelModalOpening = false;
       showToast('Сначала добавь автомобиль');
       return;
     }
+
+    // Авто запоминаем сразу: пока грузятся подсказки, пользователь может
+    // переключить активную машину, а запись должна уйти той, для которой
+    // открыта форма.
+    const formVehicleId = activeVehicleId;
+
+    // Прогноз пробега и последняя заправка грузятся параллельно: это две
+    // независимые подсказки, ждать их по очереди незачем.
+    const [prediction, lastRefuelRes] = await Promise.all([
+      predictMileage(formVehicleId),
+      (async () => {
+        try {
+          return await db.from('refuels')
+            .select('liters, total_cost, is_full_tank')
+            .eq('vehicle_id', formVehicleId)
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        } catch (e) {
+          console.error('Не удалось загрузить прошлую заправку:', e);
+          return { data: null, error: e };
+        }
+      })()
+    ]);
+
+    // Подсказка — не повод не открыть форму: при любой ошибке полей
+    // просто не будет, форма останется как раньше.
+    if (lastRefuelRes && lastRefuelRes.error) {
+      console.error('Прошлая заправка недоступна:', lastRefuelRes.error);
+    }
+    const lastRefuel = (lastRefuelRes && !lastRefuelRes.error) ? lastRefuelRes.data : null;
+
+    const hasPrediction = prediction && prediction.predicted !== null && prediction.predicted !== undefined;
+
+    // Значения полей: числа из базы приходят строками, esc() страхует
+    // от кавычек в данных.
+    const litersValue = lastRefuel && lastRefuel.liters !== null && lastRefuel.liters !== undefined
+      ? esc(String(lastRefuel.liters))
+      : '';
+    const totalValue = lastRefuel && lastRefuel.total_cost !== null && lastRefuel.total_cost !== undefined
+      ? esc(String(lastRefuel.total_cost))
+      : '';
+    const fullChecked = !!(lastRefuel && lastRefuel.is_full_tank === true);
+
+    // Подпись под пробегом: с прогнозом — прогноз, без него — старое
+    // объяснение, зачем это поле.
+    const mileageHint = hasPrediction
+      ? mileagePredictionHtml(prediction, true)
+      : `<div style="font-size: 12px; color: var(--text-dim); margin: -6px 0 12px 4px;">
+          Нужен для расчёта расхода и напоминаний о ТО
+        </div>`;
 
     const modal = document.createElement('div');
     modal.id = 'add-refuel-modal';
@@ -3342,16 +3703,15 @@
         </div>
 
         ${dateFieldHtml('r-date', todayStr())}
-        <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01">
-        <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01">
+        <input type="number" id="r-liters" class="input" placeholder="Литров" step="0.01" value="${litersValue}">
+        <input type="number" id="r-total" class="input" placeholder="Сумма (₽)" step="0.01" value="${totalValue}">
 
-        <input type="number" id="r-mileage" class="input" placeholder="Пробег (км) — обязательное поле" step="1">
-        <div style="font-size: 12px; color: var(--text-dim); margin: -6px 0 12px 4px;">
-          Нужен для расчёта расхода и напоминаний о ТО
-        </div>
+        <input type="number" id="r-mileage" class="input" placeholder="Пробег (км) — обязательное поле" step="1" value="${hasPrediction ? esc(String(prediction.predicted)) : ''}">
+        ${mileageHint}
+        ${hasPrediction ? mileageQuickBtnsHtml('r-mileage') : ''}
 
         <label style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--bg); border-radius: 14px; margin-bottom: 12px; cursor: pointer;">
-          <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);">
+          <input type="checkbox" id="r-full" style="width: 20px; height: 20px; accent-color: var(--accent);"${fullChecked ? ' checked' : ''}>
           <span style="font-size: 15px;">Полный бак</span>
         </label>
 
@@ -3362,7 +3722,8 @@
       </div>
     `;
     document.body.appendChild(modal);
-    refuelFormVehicleId = activeVehicleId;
+    refuelFormVehicleId = formVehicleId;
+    refuelModalOpening = false;
     setupModal(modal, dateFocusId('r-date'));
   }
 
